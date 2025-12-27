@@ -27,6 +27,7 @@ export interface Config {
   // OpenCode
   opencodeCommand: string;
   projectsDir: string;
+  freeChatDir: string; // Directory for free-flowing chat mode (no project)
 
   // OpenCode Server API
   opencodeServerPort: number; // Port for OpenCode server (0 = auto-select)
@@ -64,6 +65,7 @@ export const config: Config = {
   // OpenCode
   opencodeCommand: process.env.OPENCODE_COMMAND || 'opencode',
   projectsDir: expandHome(process.env.PROJECTS_DIR || '~/projects'),
+  freeChatDir: expandHome(process.env.FREE_CHAT_DIR || '~/.opencode-chat'),
 
   // OpenCode Server API
   opencodeServerPort: parseInt(process.env.OPENCODE_SERVER_PORT || '0', 10),

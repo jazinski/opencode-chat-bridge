@@ -88,6 +88,7 @@ export class TelegramAdapter implements ChatAdapter {
     // Command handlers
     this.bot.command('start', this.handleStart.bind(this));
     this.bot.command('help', this.handleHelp.bind(this));
+    this.bot.command('chat', this.handleChat.bind(this));
     this.bot.command('projects', this.handleProjects.bind(this));
     this.bot.command('switch', this.handleSwitch.bind(this));
     this.bot.command('status', this.handleStatus.bind(this));
@@ -117,6 +118,7 @@ export class TelegramAdapter implements ChatAdapter {
       `🤖 *OpenCode Chat Bridge*\n\n` +
         `I'm your bridge to OpenCode! Send me messages and I'll forward them to your OpenCode session.\n\n` +
         `*Commands:*\n` +
+        `/chat - Free chat mode (no project needed)\n` +
         `/projects - List available projects\n` +
         `/switch <project> - Switch to a project\n` +
         `/status - Show session status\n` +
@@ -142,6 +144,73 @@ export class TelegramAdapter implements ChatAdapter {
    */
   private async handleHelp(ctx: Context): Promise<void> {
     await this.handleStart(ctx);
+  }
+
+  /**
+   * /chat command - start or continue free-flowing chat mode (no project required)
+   */
+  private async handleChat(ctx: Context): Promise<void> {
+    const chatId = String(ctx.chat?.id);
+    const userId = String(ctx.from?.id);
+    const text = (ctx.message as { text?: string })?.text || '';
+    const args = text.split(/\s+/).slice(1);
+
+    // Ensure the free chat directory exists
+    if (!fs.existsSync(config.freeChatDir)) {
+      fs.mkdirSync(config.freeChatDir, { recursive: true });
+      logger.info(`Created free chat directory: ${config.freeChatDir}`);
+    }
+
+    // Check if user wants a fresh chat
+    const isNewChat = args[0]?.toLowerCase() === 'new';
+
+    let session = sessionManager.get(chatId);
+
+    try {
+      if (isNewChat && session) {
+        // Clear the current session for a fresh start
+        await sessionManager.clear(chatId);
+        session = undefined;
+      }
+
+      if (session) {
+        // Check if already in chat mode (same project path)
+        if (session.toJSON().projectPath === config.freeChatDir) {
+          await ctx.reply(
+            `💬 *Free Chat Mode*\n\n` +
+              `You're already in free chat mode! Just send me any message.\n\n` +
+              `Use \`/chat new\` to start a fresh conversation.\n` +
+              `Use \`/projects\` to switch to a project.`,
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+
+        // Switch existing session to free chat
+        await ctx.reply('💬 Switching to free chat mode...', { parse_mode: 'Markdown' });
+        await session.switchProject(config.freeChatDir);
+      } else {
+        // Create new session for free chat
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(chatId, session);
+        await session.start();
+      }
+
+      // Persist the session
+      sessionManager.persist(chatId);
+
+      const freshNote = isNewChat ? ' (fresh start)' : '';
+      await ctx.reply(
+        `💬 *Free Chat Mode${freshNote}*\n\n` +
+          `Ask me anything! I can help with general questions, brainstorming, writing, and more.\n\n` +
+          `Use \`/chat new\` to start a fresh conversation.\n` +
+          `Use \`/projects\` to switch to a coding project.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error) {
+      logger.error('Error switching to chat mode:', error);
+      await ctx.reply('❌ Failed to start chat mode. Please try again.');
+    }
   }
 
   /**
