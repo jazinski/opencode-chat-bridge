@@ -1,8 +1,8 @@
-import { createApp, startServer } from './server/app.js';
-import { TelegramAdapter } from './adapters/TelegramAdapter.js';
-import { sessionManager } from './sessions/SessionManager.js';
-import { logger } from './utils/logger.js';
-import config, { validateConfig } from './config/index.js';
+import { createApp, startServer } from '@/server/app.js';
+import { TelegramAdapter } from '@/adapters/TelegramAdapter.js';
+import { sessionManager } from '@/sessions/SessionManager.js';
+import { logger } from '@/utils/logger.js';
+import config, { validateConfig } from '@/config';
 
 async function main(): Promise<void> {
   logger.info('OpenCode Chat Bridge starting...');

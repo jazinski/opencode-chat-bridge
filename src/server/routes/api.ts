@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { sessionManager } from '../sessions/SessionManager.js';
-import { logger } from '../utils/logger.js';
-import config from '../config/index.js';
+import { sessionManager } from '@/sessions/SessionManager.js';
+import { logger } from '@/utils/logger.js';
+import config from '@/config';
 
 const router = express.Router();
 

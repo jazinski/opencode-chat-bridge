@@ -1,7 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
-import apiRoutes from './routes/api.js';
-import { logger } from '../utils/logger.js';
-import config from '../config/index.js';
+import apiRoutes from '@/server/routes/api.js';
+import { logger } from '@/utils/logger.js';
+import config from '@/config';
 
 /**
  * Create and configure the Express application

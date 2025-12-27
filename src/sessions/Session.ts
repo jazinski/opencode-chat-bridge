@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PtyHandler } from '../pty/PtyHandler.js';
-import { logger } from '../utils/logger.js';
-import config from '../config/index.js';
+import { PtyHandler } from '@/pty/PtyHandler.js';
+import { logger } from '@/utils/logger.js';
+import config from '@/config';
 
 export interface SessionData {
   id: string;

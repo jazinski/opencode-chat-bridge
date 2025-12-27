@@ -1,6 +1,6 @@
-import { Session, SessionData } from './Session.js';
-import { logger } from '../utils/logger.js';
-import config from '../config/index.js';
+import { Session, SessionData } from '@/sessions/Session.js';
+import { logger } from '@/utils/logger.js';
+import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 
@@ -102,9 +102,7 @@ export class SessionManager {
    * Get all active sessions
    */
   getAll(): Session[] {
-    return Array.from(this.sessions.values()).filter(
-      (s) => s.getStatus() !== 'terminated'
-    );
+    return Array.from(this.sessions.values()).filter((s) => s.getStatus() !== 'terminated');
   }
 
   /**

@@ -1,10 +1,10 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
-import { ChatAdapter, IncomingMessage } from './BaseAdapter.js';
-import { sessionManager } from '../sessions/SessionManager.js';
-import { formatForTelegram, detectConfirmationPrompt } from '../utils/outputParser.js';
-import { logger } from '../utils/logger.js';
-import config from '../config/index.js';
+import { ChatAdapter, IncomingMessage } from '@/adapters/BaseAdapter.js';
+import { sessionManager } from '@/sessions/SessionManager.js';
+import { formatForTelegram, detectConfirmationPrompt } from '@/utils/outputParser.js';
+import { logger } from '@/utils/logger.js';
+import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 
@@ -38,10 +38,7 @@ export class TelegramAdapter implements ChatAdapter {
       }
 
       // Check if user is allowed
-      if (
-        config.telegramAllowedUsers.length > 0 &&
-        !config.telegramAllowedUsers.includes(userId)
-      ) {
+      if (config.telegramAllowedUsers.length > 0 && !config.telegramAllowedUsers.includes(userId)) {
         logger.warn(`Unauthorized access attempt from user ${userId}`);
         await ctx.reply('⛔ You are not authorized to use this bot.');
         return;
@@ -132,17 +129,14 @@ export class TelegramAdapter implements ChatAdapter {
       }
 
       // Create inline keyboard with project buttons
-      const buttons = projects.slice(0, 10).map((project) => [
-        Markup.button.callback(`📂 ${project}`, `switch:${project}`),
-      ]);
+      const buttons = projects
+        .slice(0, 10)
+        .map((project) => [Markup.button.callback(`📂 ${project}`, `switch:${project}`)]);
 
-      await ctx.reply(
-        `📁 *Available Projects*\n\nTap to switch, or use \`/switch <name>\``,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard(buttons),
-        }
-      );
+      await ctx.reply(`📁 *Available Projects*\n\nTap to switch, or use \`/switch <name>\``, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(buttons),
+      });
     } catch (error) {
       logger.error('Error listing projects:', error);
       await ctx.reply('❌ Error listing projects');
@@ -301,7 +295,10 @@ export class TelegramAdapter implements ChatAdapter {
 
     if (!session) {
       // Try to restore
-      session = sessionManager.restore(chatId);
+      const restored = sessionManager.restore(chatId);
+      if (restored) {
+        session = restored;
+      }
     }
 
     if (!session) {
@@ -314,9 +311,7 @@ export class TelegramAdapter implements ChatAdapter {
     if (!session.isRunning()) {
       try {
         session.start();
-        await ctx.reply('🚀 Starting OpenCode session...', {
-          reply_to_message_id: (ctx.message as { message_id?: number })?.message_id,
-        });
+        await ctx.reply('🚀 Starting OpenCode session...');
       } catch (error) {
         logger.error('Failed to start session:', error);
         await ctx.reply('❌ Failed to start OpenCode. Is it installed?');

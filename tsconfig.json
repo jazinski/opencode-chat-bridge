@@ -13,7 +13,18 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": ["./*"],
+      "@/config": ["./config/index.js"],
+      "@/config/*": ["./config/*"],
+      "@/utils/*": ["./utils/*"],
+      "@/sessions/*": ["./sessions/*"],
+      "@/adapters/*": ["./adapters/*"],
+      "@/pty/*": ["./pty/*"],
+      "@/server/*": ["./server/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

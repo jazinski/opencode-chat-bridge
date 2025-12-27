@@ -1,7 +1,4 @@
-import stripAnsiModule from 'strip-ansi';
-
-// Handle ESM default export
-const stripAnsi = stripAnsiModule.default || stripAnsiModule;
+import stripAnsi from 'strip-ansi';
 
 /**
  * Maximum message length for Telegram
@@ -30,7 +27,7 @@ export function cleanOutput(text: string): string {
   // Trim trailing whitespace from each line
   cleaned = cleaned
     .split('\n')
-    .map((line) => line.trimEnd())
+    .map((line: string) => line.trimEnd())
     .join('\n');
 
   return cleaned.trim();

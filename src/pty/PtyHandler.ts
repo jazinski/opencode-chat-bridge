@@ -1,7 +1,7 @@
 import * as pty from 'node-pty';
 import { EventEmitter } from 'events';
-import { logger } from '../utils/logger.js';
-import { cleanOutput } from '../utils/outputParser.js';
+import { logger } from '@/utils/logger.js';
+import { cleanOutput } from '@/utils/outputParser.js';
 
 export interface PtyOptions {
   command: string;

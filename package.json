@@ -2,6 +2,7 @@
   "name": "opencode-chat-bridge",
   "version": "1.0.0",
   "description": "Node/Express API wrapper for OpenCode CLI - enables task dispatch via Telegram, Slack, Discord chat interfaces",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
