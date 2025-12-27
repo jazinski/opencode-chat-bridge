@@ -52,6 +52,8 @@ export class TelegramAdapter implements ChatAdapter {
   private isRunning: boolean = false;
   private thinkingStates: Map<string, ThinkingState> = new Map();
   private streamingStates: Map<string, StreamingState> = new Map();
+  /** Track chats where termination message should be suppressed (user-initiated clear) */
+  private suppressTerminationMessage: Set<string> = new Set();
 
   constructor() {
     if (!config.telegramBotToken) {
@@ -344,11 +346,17 @@ export class TelegramAdapter implements ChatAdapter {
   private async handleClear(ctx: Context): Promise<void> {
     const chatId = String(ctx.chat?.id);
 
+    // Suppress the 'terminated' event message since we'll send our own
+    this.suppressTerminationMessage.add(chatId);
+
     if (await sessionManager.clear(chatId)) {
       await ctx.reply('🧹 Session cleared. Send a message to start a new one.');
     } else {
       await ctx.reply('📊 No active session to clear.');
     }
+
+    // Clean up the flag after a short delay
+    setTimeout(() => this.suppressTerminationMessage.delete(chatId), 1000);
   }
 
   /**
@@ -639,6 +647,11 @@ export class TelegramAdapter implements ChatAdapter {
 
       // Clean up streaming state
       await this.cleanupStreaming(chatId);
+
+      // Only send termination message if not user-initiated (e.g., /clear)
+      if (this.suppressTerminationMessage.has(chatId)) {
+        return;
+      }
 
       try {
         await this.bot.telegram.sendMessage(
