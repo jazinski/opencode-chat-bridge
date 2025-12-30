@@ -45,13 +45,19 @@ export class SlackAdapter implements ChatAdapter {
     // Authorization middleware
     this.app.use(async ({ payload, context, next }: any) => {
       // Check if channel is allowed (if restriction is set)
-      if (
-        'channel' in payload &&
-        config.slackAllowedChannels.length > 0 &&
-        !config.slackAllowedChannels.includes(payload.channel as string)
-      ) {
-        logger.warn(`Unauthorized access attempt from channel ${payload.channel}`);
-        return;
+      if (config.slackAllowedChannels.length > 0) {
+        // Extract channel ID from different payload types
+        const channelId =
+          payload.channel || payload.channel_id || (payload.event && payload.event.channel);
+
+        logger.info(
+          `[Slack Auth] Checking channel authorization. Channel: ${channelId}, Allowed: ${config.slackAllowedChannels.join(',')}, Payload type: ${payload.type || 'unknown'}`
+        );
+
+        if (channelId && !config.slackAllowedChannels.includes(channelId)) {
+          logger.warn(`Unauthorized access attempt from channel ${channelId}`);
+          return;
+        }
       }
 
       await next();

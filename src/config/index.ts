@@ -50,7 +50,10 @@ export interface Config {
 
 function parseAllowedUsers(value: string | undefined): number[] {
   if (!value) return [];
-  return value
+  // Remove inline comments (everything after #)
+  const cleanValue = value.split('#')[0].trim();
+  if (!cleanValue) return [];
+  return cleanValue
     .split(',')
     .map((id) => parseInt(id.trim(), 10))
     .filter((id) => !isNaN(id));
@@ -58,7 +61,10 @@ function parseAllowedUsers(value: string | undefined): number[] {
 
 function parseAllowedChannels(value: string | undefined): string[] {
   if (!value) return [];
-  return value
+  // Remove inline comments (everything after #)
+  const cleanValue = value.split('#')[0].trim();
+  if (!cleanValue) return [];
+  return cleanValue
     .split(',')
     .map((channel) => channel.trim())
     .filter((channel) => channel.length > 0);
