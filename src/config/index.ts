@@ -24,6 +24,12 @@ export interface Config {
   telegramBotToken: string;
   telegramAllowedUsers: number[];
 
+  // Slack
+  slackBotToken: string;
+  slackAppToken: string;
+  slackSigningSecret: string;
+  slackAllowedChannels: string[];
+
   // OpenCode
   opencodeCommand: string;
   projectsDir: string;
@@ -50,6 +56,14 @@ function parseAllowedUsers(value: string | undefined): number[] {
     .filter((id) => !isNaN(id));
 }
 
+function parseAllowedChannels(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((channel) => channel.trim())
+    .filter((channel) => channel.length > 0);
+}
+
 export const config: Config = {
   // Server
   port: parseInt(process.env.PORT || '3000', 10),
@@ -61,6 +75,12 @@ export const config: Config = {
   // Telegram
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramAllowedUsers: parseAllowedUsers(process.env.TELEGRAM_ALLOWED_USERS),
+
+  // Slack
+  slackBotToken: process.env.SLACK_BOT_TOKEN || '',
+  slackAppToken: process.env.SLACK_APP_TOKEN || '',
+  slackSigningSecret: process.env.SLACK_SIGNING_SECRET || '',
+  slackAllowedChannels: parseAllowedChannels(process.env.SLACK_ALLOWED_CHANNELS),
 
   // OpenCode
   opencodeCommand: process.env.OPENCODE_COMMAND || 'opencode',
@@ -83,8 +103,12 @@ export const config: Config = {
 export function validateConfig(): void {
   const errors: string[] = [];
 
-  if (!config.telegramBotToken) {
-    errors.push('TELEGRAM_BOT_TOKEN is required');
+  // At least one chat adapter must be configured
+  const hasTelegram = !!config.telegramBotToken;
+  const hasSlack = !!config.slackBotToken && !!config.slackAppToken && !!config.slackSigningSecret;
+
+  if (!hasTelegram && !hasSlack) {
+    errors.push('At least one chat adapter must be configured (Telegram or Slack)');
   }
 
   if (!config.apiKey) {

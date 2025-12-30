@@ -1,5 +1,6 @@
 import { createApp, startServer } from '@/server/app.js';
 import { TelegramAdapter } from '@/adapters/TelegramAdapter.js';
+import { SlackAdapter } from '@/adapters/SlackAdapter.js';
 import { sessionManager } from '@/sessions/SessionManager.js';
 import { logger } from '@/utils/logger.js';
 import config, { validateConfig } from '@/config';
@@ -33,7 +34,22 @@ async function main(): Promise<void> {
       logger.error('Failed to start Telegram bot:', error);
     }
   } else {
-    logger.warn('TELEGRAM_BOT_TOKEN not set, Telegram bot disabled');
+    logger.info('TELEGRAM_BOT_TOKEN not set, Telegram bot disabled');
+  }
+
+  // Start Slack adapter
+  let slackAdapter: SlackAdapter | null = null;
+
+  if (config.slackBotToken && config.slackAppToken && config.slackSigningSecret) {
+    try {
+      slackAdapter = new SlackAdapter();
+      await slackAdapter.start();
+      logger.info('Slack bot started');
+    } catch (error) {
+      logger.error('Failed to start Slack bot:', error);
+    }
+  } else {
+    logger.info('Slack credentials not set, Slack bot disabled');
   }
 
   // Graceful shutdown
@@ -43,6 +59,11 @@ async function main(): Promise<void> {
     // Stop Telegram bot
     if (telegramAdapter) {
       await telegramAdapter.stop();
+    }
+
+    // Stop Slack bot
+    if (slackAdapter) {
+      await slackAdapter.stop();
     }
 
     // Shutdown sessions (will persist them)
