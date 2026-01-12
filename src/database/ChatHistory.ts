@@ -319,7 +319,7 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
           message_id VARCHAR(255) NOT NULL,
           thread_id VARCHAR(255),
           message_text TEXT NOT NULL,
-          timestamp BIGINT NOT NULL,
+          timestamp DOUBLE PRECISION NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(platform, message_id)
         );
