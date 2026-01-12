@@ -100,6 +100,7 @@ export class SlackAdapter implements ChatAdapter {
     this.app.command('/chat', this.handleChat.bind(this));
     this.app.command('/ai-search', this.handleSearch.bind(this));
     this.app.command('/ai-history-stats', this.handleHistoryStats.bind(this));
+    this.app.command('/ask', this.handleAsk.bind(this));
 
     // Interactive button handler
     this.app.action(/^switch_project_/, this.handleProjectSwitch.bind(this));
@@ -281,6 +282,7 @@ export class SlackAdapter implements ChatAdapter {
         `/stop - Stop current operation\n` +
         `/ai-search <query> - Search chat history\n` +
         `/ai-history-stats - View chat history statistics\n` +
+        `/ask <question> - Ask questions about chat history\n` +
         `/help - Show this help\n\n` +
         `Send any text to interact with me!`,
     });
@@ -656,6 +658,83 @@ export class SlackAdapter implements ChatAdapter {
     } catch (error) {
       logger.error('Error getting chat history stats:', error);
       await respond({ text: '❌ Failed to get chat history statistics' });
+    }
+  }
+
+  /**
+   * /ask command - Ask questions about chat history using RAG
+   */
+  private async handleAsk({ command, ack, respond }: any): Promise<void> {
+    await ack();
+
+    const question = command.text.trim();
+    if (!question) {
+      await respond({
+        text:
+          '🤔 *Ask About Chat History*\n\n' +
+          'Usage: `/ask <question>`\n\n' +
+          'Examples:\n' +
+          '• `/ask what did we discuss about databases yesterday?`\n' +
+          '• `/ask summarize our conversation about authentication`\n' +
+          '• `/ask what bugs did we talk about last week?`',
+      });
+      return;
+    }
+
+    try {
+      const channel = command.channel_id;
+      const userId = command.user_id;
+      const chatId = `${channel}-${userId}`;
+
+      // Search for relevant context
+      const context = await this.getChatHistoryContext(channel, question);
+
+      if (!context) {
+        await respond({
+          text: "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/ai-search` to search for keywords.",
+        });
+        return;
+      }
+
+      // Get or create session
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(channel, chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(channel, chatId, session);
+      }
+
+      // Start session if not running
+      if (!session.isRunning()) {
+        await respond({ text: '🚀 Starting session...' });
+        await session.start();
+      }
+
+      // Create augmented prompt with chat history context
+      const augmentedPrompt =
+        `Based on our previous chat history, please answer this question:\n\n` +
+        `Question: ${question}\n\n` +
+        `Relevant chat history:\n${context}\n\n` +
+        `Please provide a helpful answer based on the conversation history above.`;
+
+      // Send to OpenCode for RAG-enhanced response
+      await respond({ text: '🤔 Analyzing chat history and generating answer...' });
+
+      // Use synchronous message to get immediate response
+      const response = await session.sendMessageSync(augmentedPrompt);
+
+      await respond({
+        text: `💬 *Answer:*\n\n${response.text}`,
+      });
+    } catch (error) {
+      logger.error('Error processing /ask command:', error);
+      await respond({ text: '❌ Failed to process your question. Please try again.' });
     }
   }
 

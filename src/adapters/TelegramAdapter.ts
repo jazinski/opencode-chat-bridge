@@ -101,6 +101,7 @@ export class TelegramAdapter implements ChatAdapter {
     this.bot.command('stop', this.handleStop.bind(this));
     this.bot.command('search', this.handleSearch.bind(this));
     this.bot.command('history_stats', this.handleHistoryStats.bind(this));
+    this.bot.command('ask', this.handleAsk.bind(this));
     this.bot.command('search', this.handleSearch.bind(this));
     this.bot.command('history_stats', this.handleHistoryStats.bind(this));
 
@@ -135,6 +136,7 @@ export class TelegramAdapter implements ChatAdapter {
         `/stop - Stop current operation\n` +
         `/search <query> - Search chat history\n` +
         `/history_stats - View chat history statistics\n` +
+        `/ask <question> - Ask questions about chat history\n` +
         `/help - Show this help\n\n` +
         `Send any text to interact with me!`,
       { parse_mode: 'Markdown' }
@@ -490,6 +492,100 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   /**
+   * /ask command - Ask questions about chat history using RAG
+   */
+  private async handleAsk(ctx: Context): Promise<void> {
+    const text = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const question = text.replace('/ask', '').trim();
+
+    if (!question) {
+      await ctx.reply(
+        '🤔 *Ask About Chat History*\n\n' +
+          'Usage: `/ask <question>`\n\n' +
+          'Examples:\n' +
+          '• `/ask what did we discuss about databases yesterday?`\n' +
+          '• `/ask summarize our conversation about authentication`\n' +
+          '• `/ask what bugs did we talk about last week?`',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    try {
+      const chatId = String(ctx.chat?.id);
+      const userId = String(ctx.from?.id);
+
+      // Search for relevant context (up to 10 relevant messages)
+      const searchResults = await Promise.resolve(
+        chatHistoryDB.searchMessages(question, 'telegram', chatId, 10)
+      );
+
+      if (searchResults.length === 0) {
+        await ctx.reply(
+          "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/search` to search for keywords."
+        );
+        return;
+      }
+
+      // Build context from search results
+      const formatTimestamp = (timestamp: number) => {
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
+      let context = '';
+      for (const result of searchResults) {
+        const userName = result.user_name || result.user_id;
+        const time = formatTimestamp(result.timestamp);
+        context += `[${time}] ${userName}: ${result.message_text}\n\n`;
+      }
+
+      // Get or create session
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(chatId, session);
+      }
+
+      // Start session if not running
+      if (!session.isRunning()) {
+        await ctx.reply('🚀 Starting session...');
+        await session.start();
+      }
+
+      // Create augmented prompt with chat history context
+      const augmentedPrompt =
+        `Based on our previous chat history, please answer this question:\n\n` +
+        `Question: ${question}\n\n` +
+        `Relevant chat history:\n${context}\n\n` +
+        `Please provide a helpful answer based on the conversation history above.`;
+
+      // Send to OpenCode for RAG-enhanced response
+      await ctx.reply('🤔 Analyzing chat history and generating answer...');
+
+      // Use synchronous message to get immediate response
+      const response = await session.sendMessageSync(augmentedPrompt);
+
+      await ctx.reply(`💬 *Answer:*\n\n${response.text}`, { parse_mode: 'Markdown' });
+    } catch (error) {
+      logger.error('Error processing /ask command:', error);
+      await ctx.reply('❌ Failed to process your question. Please try again.');
+    }
+  }
+
+  /**
    * Handle callback queries (button presses)
    */
   private async handleCallback(ctx: Context): Promise<void> {
@@ -574,6 +670,7 @@ export class TelegramAdapter implements ChatAdapter {
     'stop',
     'search',
     'history_stats',
+    'ask',
   ]);
 
   /**
