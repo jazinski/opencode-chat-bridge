@@ -27,8 +27,10 @@ async function main(): Promise<void> {
 
   if (config.telegramBotToken) {
     try {
+      logger.info('Starting Telegram bot...');
       telegramAdapter = new TelegramAdapter();
-      await telegramAdapter.start();
+      // Don't await - bot.launch() starts a long-running process
+      telegramAdapter.start();
       logger.info('Telegram bot started');
     } catch (error) {
       logger.error('Failed to start Telegram bot:', error);
@@ -40,10 +42,16 @@ async function main(): Promise<void> {
   // Start Slack adapter
   let slackAdapter: SlackAdapter | null = null;
 
+  logger.info(
+    `Slack config check: botToken=${!!config.slackBotToken}, appToken=${!!config.slackAppToken}, signingSecret=${!!config.slackSigningSecret}`
+  );
+
   if (config.slackBotToken && config.slackAppToken && config.slackSigningSecret) {
     try {
+      logger.info('Starting Slack adapter...');
       slackAdapter = new SlackAdapter();
-      await slackAdapter.start();
+      // Don't await - app.start() starts a long-running Socket Mode connection
+      slackAdapter.start();
       logger.info('Slack bot started');
     } catch (error) {
       logger.error('Failed to start Slack bot:', error);

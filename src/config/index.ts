@@ -2,8 +2,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 import os from 'os';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from .env file
+// override: false means existing environment variables take precedence
+// This is important for systemd services that use EnvironmentFile
+dotenv.config({ override: false });
 
 function expandHome(filepath: string): string {
   if (filepath.startsWith('~/')) {
