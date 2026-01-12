@@ -561,7 +561,6 @@ export class TelegramAdapter implements ChatAdapter {
 
       // Start session if not running
       if (!session.isRunning()) {
-        await ctx.reply('🚀 Starting session...');
         await session.start();
       }
 
@@ -572,13 +571,13 @@ export class TelegramAdapter implements ChatAdapter {
         `Relevant chat history:\n${context}\n\n` +
         `Please provide a helpful answer based on the conversation history above.`;
 
-      // Send to OpenCode for RAG-enhanced response
-      await ctx.reply('🤔 Analyzing chat history and generating answer...');
+      // Send initial status
+      await ctx.reply('Analyzing...');
 
       // Use synchronous message to get immediate response
       const response = await session.sendMessageSync(augmentedPrompt);
 
-      await ctx.reply(`💬 *Answer:*\n\n${response.text}`, { parse_mode: 'Markdown' });
+      await ctx.reply(response.text);
     } catch (error) {
       logger.error('Error processing /ask command:', error);
       await ctx.reply('❌ Failed to process your question. Please try again.');

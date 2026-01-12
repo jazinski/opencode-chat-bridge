@@ -712,7 +712,6 @@ export class SlackAdapter implements ChatAdapter {
 
       // Start session if not running
       if (!session.isRunning()) {
-        await respond({ text: '🚀 Starting session...' });
         await session.start();
       }
 
@@ -723,14 +722,14 @@ export class SlackAdapter implements ChatAdapter {
         `Relevant chat history:\n${context}\n\n` +
         `Please provide a helpful answer based on the conversation history above.`;
 
-      // Send to OpenCode for RAG-enhanced response
-      await respond({ text: '🤔 Analyzing chat history and generating answer...' });
+      // Send initial status
+      await respond({ text: 'Analyzing...' });
 
       // Use synchronous message to get immediate response
       const response = await session.sendMessageSync(augmentedPrompt);
 
       await respond({
-        text: `💬 *Answer:*\n\n${response.text}`,
+        text: response.text,
       });
     } catch (error) {
       logger.error('Error processing /ask command:', error);
