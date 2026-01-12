@@ -267,32 +267,36 @@ The install script creates two services:
 
 ## Telegram Commands
 
-| Command           | Description                                |
-| ----------------- | ------------------------------------------ |
-| `/start`          | Start the bot and show help                |
-| `/help`           | Show available commands                    |
-| `/chat [new]`     | Start free chat mode (no project required) |
-| `/projects`       | List available projects with buttons       |
-| `/switch <name>`  | Switch to a different project              |
-| `/status`         | Show current session status                |
-| `/clear`          | Clear/reset the current session            |
-| `/stop`           | Interrupt current operation                |
-| `/search <query>` | Search chat history                        |
-| `/history_stats`  | View chat history statistics               |
+| Command           | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `/start`          | Start the bot and show help                             |
+| `/help`           | Show available commands                                 |
+| `/chat [new]`     | Start free chat mode (no project required)              |
+| `/projects`       | List available projects with buttons                    |
+| `/switch <name>`  | Switch to a different project                           |
+| `/status`         | Show current session status                             |
+| `/clear`          | Clear/reset the current session                         |
+| `/stop`           | Interrupt current operation                             |
+| `/search <query>` | Search chat history by keywords                         |
+| `/history_stats`  | View chat history statistics                            |
+| `/ask <question>` | Ask natural language questions about chat history (RAG) |
 
 ## Slack Commands
 
 The Slack bot supports the following slash commands:
 
-| Command          | Description                                |
-| ---------------- | ------------------------------------------ |
-| `/help`          | Show available commands                    |
-| `/chat [new]`    | Start free chat mode (no project required) |
-| `/projects`      | List available projects with buttons       |
-| `/switch <name>` | Switch to a different project              |
-| `/ai-status`     | Show current session status                |
-| `/clear`         | Clear/reset the current session            |
-| `/stop`          | Interrupt current operation                |
+| Command              | Description                                             |
+| -------------------- | ------------------------------------------------------- |
+| `/help`              | Show available commands                                 |
+| `/chat [new]`        | Start free chat mode (no project required)              |
+| `/projects`          | List available projects with buttons                    |
+| `/switch <name>`     | Switch to a different project                           |
+| `/ai-status`         | Show current session status                             |
+| `/clear`             | Clear/reset the current session                         |
+| `/stop`              | Interrupt current operation                             |
+| `/ai-search <query>` | Search chat history by keywords                         |
+| `/ai-history-stats`  | View chat history statistics                            |
+| `/ask <question>`    | Ask natural language questions about chat history (RAG) |
 
 ## Slack Usage
 
