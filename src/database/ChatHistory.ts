@@ -548,26 +548,115 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
  */
 export class ChatHistoryDB {
   private backend: ChatHistoryBackend;
+  private sqliteBackend: SQLiteChatHistory | null = null;
+  private postgresBackend: PostgreSQLChatHistory | null = null;
+  private syncInterval: NodeJS.Timeout | null = null;
+  private isSyncing = false;
 
   constructor(dbPath?: string) {
+    const defaultPath = path.join(config.sessionPersistDir, 'chat-history.db');
+    const finalPath = dbPath || defaultPath;
+
+    // Always initialize SQLite as fallback
+    this.sqliteBackend = new SQLiteChatHistory(finalPath);
+
     // Check if PostgreSQL is configured
     if (config.postgresUrl) {
       logger.info('PostgreSQL URL configured, attempting to use PostgreSQL backend');
       try {
-        this.backend = new PostgreSQLChatHistory(config.postgresUrl);
+        this.postgresBackend = new PostgreSQLChatHistory(config.postgresUrl);
+        this.backend = this.postgresBackend;
         logger.info('PostgreSQL backend initialized (will connect on first use)');
+
+        // Start sync interval to check PostgreSQL health and sync SQLite data
+        this.startSyncInterval();
       } catch (error) {
-        logger.error('Failed to initialize PostgreSQL backend, falling back to SQLite:', error);
-        const defaultPath = path.join(config.sessionPersistDir, 'chat-history.db');
-        const finalPath = dbPath || defaultPath;
-        this.backend = new SQLiteChatHistory(finalPath);
+        logger.error('Failed to initialize PostgreSQL backend, using SQLite:', error);
+        this.backend = this.sqliteBackend;
       }
     } else {
-      // Fall back to SQLite
+      // Use SQLite
       logger.info('No PostgreSQL URL configured, using SQLite backend');
-      const defaultPath = path.join(config.sessionPersistDir, 'chat-history.db');
-      const finalPath = dbPath || defaultPath;
-      this.backend = new SQLiteChatHistory(finalPath);
+      this.backend = this.sqliteBackend;
+    }
+  }
+
+  /**
+   * Start periodic sync from SQLite to PostgreSQL
+   */
+  private startSyncInterval(): void {
+    // Check every 30 seconds
+    this.syncInterval = setInterval(() => {
+      this.syncSQLiteToPostgres().catch((err) => {
+        logger.debug('Sync check error:', err);
+      });
+    }, 30000);
+  }
+
+  /**
+   * Sync messages from SQLite to PostgreSQL
+   */
+  private async syncSQLiteToPostgres(): Promise<void> {
+    if (this.isSyncing || !this.postgresBackend || !this.sqliteBackend) {
+      return;
+    }
+
+    // If currently using PostgreSQL, no need to sync
+    if (this.backend instanceof PostgreSQLChatHistory) {
+      return;
+    }
+
+    this.isSyncing = true;
+
+    try {
+      // Try to get stats from PostgreSQL to test connection
+      await this.postgresBackend.getStats();
+
+      // PostgreSQL is available! Switch back to it
+      logger.info('PostgreSQL connection restored, syncing SQLite messages...');
+      this.backend = this.postgresBackend;
+
+      // Get all messages from SQLite
+      const sqliteMessages = await Promise.resolve(
+        this.sqliteBackend.getRecentMessages('', '', 10000)
+      );
+
+      if (sqliteMessages.length === 0) {
+        logger.info('No messages to sync from SQLite');
+        return;
+      }
+
+      logger.info(`Syncing ${sqliteMessages.length} messages from SQLite to PostgreSQL...`);
+
+      // Sync each message to PostgreSQL
+      let syncedCount = 0;
+      for (const msg of sqliteMessages) {
+        try {
+          await this.postgresBackend.storeMessage(msg);
+          syncedCount++;
+        } catch (error) {
+          // Ignore duplicate errors (message already exists)
+          if (!String(error).includes('duplicate')) {
+            logger.warn('Failed to sync message:', error);
+          } else {
+            syncedCount++;
+          }
+        }
+      }
+
+      logger.info(
+        `Successfully synced ${syncedCount}/${sqliteMessages.length} messages to PostgreSQL`
+      );
+
+      // Clean up SQLite after successful sync
+      const cutoffTimestamp = Math.floor(Date.now() / 1000) - 1; // Delete messages older than 1 second
+      await this.sqliteBackend.deleteOldMessages(0);
+      logger.info('Cleared synced messages from SQLite');
+    } catch (error) {
+      // PostgreSQL still not available, stay on SQLite
+      logger.debug('PostgreSQL not yet available for sync');
+    } finally {
+      this.isSyncing = false;
     }
   }
 
@@ -581,11 +670,10 @@ export class ChatHistoryDB {
       return result;
     } catch (error) {
       // If PostgreSQL fails and we haven't fallen back yet, fall back to SQLite
-      if (this.backend instanceof PostgreSQLChatHistory) {
-        logger.error('PostgreSQL operation failed, attempting fallback to SQLite:', error);
-        const defaultPath = path.join(config.sessionPersistDir, 'chat-history.db');
-        this.backend = new SQLiteChatHistory(defaultPath);
-        logger.info('Fell back to SQLite backend');
+      if (this.backend instanceof PostgreSQLChatHistory && this.sqliteBackend) {
+        logger.error('PostgreSQL operation failed, falling back to SQLite:', error);
+        this.backend = this.sqliteBackend;
+        logger.info('Fell back to SQLite backend (will auto-sync when PostgreSQL recovers)');
 
         // Retry with SQLite
         const result = this.backend.storeMessage(message);
@@ -635,6 +723,11 @@ export class ChatHistoryDB {
   }
 
   close(): void | Promise<void> {
+    // Stop sync interval
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+      this.syncInterval = null;
+    }
     return this.backend.close();
   }
 }
