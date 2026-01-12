@@ -6,7 +6,7 @@ import { logger } from '@/utils/logger.js';
 import config, { validateConfig } from '@/config';
 
 async function main(): Promise<void> {
-  logger.info('OpenCode Chat Bridge starting...');
+  logger.info('Agata starting...');
   logger.info(`Environment: ${config.nodeEnv}`);
   logger.info(`Projects directory: ${config.projectsDir}`);
 
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  logger.info('OpenCode Chat Bridge ready!');
+  logger.info('Agata ready!');
 }
 
 main().catch((error) => {

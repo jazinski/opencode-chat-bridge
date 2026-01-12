@@ -98,8 +98,8 @@ export class SlackAdapter implements ChatAdapter {
     this.app.command('/stop', this.handleStop.bind(this));
     this.app.command('/help', this.handleHelp.bind(this));
     this.app.command('/chat', this.handleChat.bind(this));
-    this.app.command('/search', this.handleSearch.bind(this));
-    this.app.command('/history-stats', this.handleHistoryStats.bind(this));
+    this.app.command('/ai-search', this.handleSearch.bind(this));
+    this.app.command('/ai-history-stats', this.handleHistoryStats.bind(this));
 
     // Interactive button handler
     this.app.action(/^switch_project_/, this.handleProjectSwitch.bind(this));
@@ -270,8 +270,8 @@ export class SlackAdapter implements ChatAdapter {
 
     await respond({
       text:
-        `🤖 *OpenCode Chat Bridge*\n\n` +
-        `I'm your bridge to OpenCode! Send me messages and I'll forward them to your OpenCode session.\n\n` +
+        `🤖 *Agata*\n\n` +
+        `I'm your AI coding assistant! Send me messages and I'll help you with your projects.\n\n` +
         `*Commands:*\n` +
         `/chat - Free chat mode (no project needed)\n` +
         `/projects - List available projects\n` +
@@ -279,10 +279,10 @@ export class SlackAdapter implements ChatAdapter {
         `/ai-status - Show session status\n` +
         `/clear - Clear/reset session\n` +
         `/stop - Stop current operation\n` +
-        `/search <query> - Search chat history\n` +
-        `/history-stats - View chat history statistics\n` +
+        `/ai-search <query> - Search chat history\n` +
+        `/ai-history-stats - View chat history statistics\n` +
         `/help - Show this help\n\n` +
-        `Send any text to interact with OpenCode!`,
+        `Send any text to interact with me!`,
     });
   }
 
@@ -551,7 +551,7 @@ export class SlackAdapter implements ChatAdapter {
   }
 
   /**
-   * /search command - search chat history
+   * /ai-search command - search chat history
    */
   private async handleSearch({ command, ack, respond }: any): Promise<void> {
     await ack();
@@ -561,8 +561,8 @@ export class SlackAdapter implements ChatAdapter {
       await respond({
         text:
           '🔍 *Search Chat History*\n\n' +
-          'Usage: `/search <query>`\n\n' +
-          'Example: `/search database migration`',
+          'Usage: `/ai-search <query>`\n\n' +
+          'Example: `/ai-search database migration`',
       });
       return;
     }
@@ -601,7 +601,7 @@ export class SlackAdapter implements ChatAdapter {
         response += `*${userName}* (${time})\n${snippet}\n\n`;
       }
 
-      response += '_Use `/history-stats` to see storage statistics._';
+      response += '_Use `/ai-history-stats` to see storage statistics._';
 
       await respond({ text: response });
     } catch (error) {
@@ -611,7 +611,7 @@ export class SlackAdapter implements ChatAdapter {
   }
 
   /**
-   * /history-stats command - show chat history statistics
+   * /ai-history-stats command - show chat history statistics
    */
   private async handleHistoryStats({ command, ack, respond }: any): Promise<void> {
     await ack();
@@ -650,7 +650,7 @@ export class SlackAdapter implements ChatAdapter {
         `*Users:* ${slackStats.user_count}\n` +
         `*First message:* ${formatDate(slackStats.earliest_message)}\n` +
         `*Latest message:* ${formatDate(slackStats.latest_message)}\n\n` +
-        '_Use `/search <query>` to search messages._';
+        '_Use `/ai-search <query>` to search messages._';
 
       await respond({ text: response });
     } catch (error) {

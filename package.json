@@ -1,7 +1,7 @@
 {
   "name": "opencode-chat-bridge",
   "version": "1.0.0",
-  "description": "Node/Express API wrapper for OpenCode CLI - enables task dispatch via Telegram, Slack, Discord chat interfaces",
+  "description": "Agata - Your AI coding assistant via Telegram, Slack, and Discord",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -10,7 +10,10 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage"
   },
   "keywords": [
     "opencode",
@@ -40,13 +43,17 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
     "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.2",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
     "eslint": "^9.17.0",
+    "jest": "^30.2.0",
     "prettier": "^3.4.2",
+    "ts-jest": "^29.4.6",
     "tsc-alias": "^1.8.16",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

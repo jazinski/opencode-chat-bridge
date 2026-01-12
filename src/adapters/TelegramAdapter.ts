@@ -8,6 +8,9 @@ import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 import type { Session } from '@/sessions/Session.js';
+import { getChatHistoryDB } from '@/database/ChatHistory.js';
+
+const chatHistoryDB = getChatHistoryDB();
 
 /** Streaming message state */
 interface StreamingState {
@@ -96,6 +99,10 @@ export class TelegramAdapter implements ChatAdapter {
     this.bot.command('status', this.handleStatus.bind(this));
     this.bot.command('clear', this.handleClear.bind(this));
     this.bot.command('stop', this.handleStop.bind(this));
+    this.bot.command('search', this.handleSearch.bind(this));
+    this.bot.command('history_stats', this.handleHistoryStats.bind(this));
+    this.bot.command('search', this.handleSearch.bind(this));
+    this.bot.command('history_stats', this.handleHistoryStats.bind(this));
 
     // Callback query handler (for buttons)
     this.bot.on('callback_query', this.handleCallback.bind(this));
@@ -117,8 +124,8 @@ export class TelegramAdapter implements ChatAdapter {
     const userId = String(ctx.from?.id);
 
     await ctx.reply(
-      `🤖 *OpenCode Chat Bridge*\n\n` +
-        `I'm your bridge to OpenCode! Send me messages and I'll forward them to your OpenCode session.\n\n` +
+      `🤖 *Agata*\n\n` +
+        `I'm your AI coding assistant! Send me messages and I'll help you with your projects.\n\n` +
         `*Commands:*\n` +
         `/chat - Free chat mode (no project needed)\n` +
         `/projects - List available projects\n` +
@@ -126,8 +133,10 @@ export class TelegramAdapter implements ChatAdapter {
         `/status - Show session status\n` +
         `/clear - Clear/reset session\n` +
         `/stop - Stop current operation\n` +
+        `/search <query> - Search chat history\n` +
+        `/history_stats - View chat history statistics\n` +
         `/help - Show this help\n\n` +
-        `Send any text to interact with OpenCode!`,
+        `Send any text to interact with me!`,
       { parse_mode: 'Markdown' }
     );
 
@@ -380,6 +389,107 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   /**
+   * /search command - search chat history
+   */
+  private async handleSearch(ctx: Context): Promise<void> {
+    const text = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const query = text.replace('/search', '').trim();
+
+    if (!query) {
+      await ctx.reply(
+        '🔍 *Search Chat History*\n\n' +
+          'Usage: `/search <query>`\n\n' +
+          'Example: `/search database migration`',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    try {
+      const chatId = String(ctx.chat?.id);
+      const results = await Promise.resolve(
+        chatHistoryDB.searchMessages(query, 'telegram', chatId, 10)
+      );
+
+      if (results.length === 0) {
+        await ctx.reply(`🔍 No results found for "${query}"`);
+        return;
+      }
+
+      const formatTimestamp = (timestamp: number) => {
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
+      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*\n\n`;
+
+      for (const result of results) {
+        const userName = result.user_name || result.user_id;
+        const time = formatTimestamp(result.timestamp);
+        // Remove HTML tags from snippet (FTS adds <b> tags)
+        const snippet = result.snippet.replace(/<\/?b>/g, '*');
+
+        response += `*${userName}* (${time})\n${snippet}\n\n`;
+      }
+
+      response += '_Use /history\\_stats to see storage statistics._';
+
+      await ctx.reply(response, { parse_mode: 'Markdown' });
+    } catch (error) {
+      logger.error('Error searching chat history:', error);
+      await ctx.reply('❌ Failed to search chat history');
+    }
+  }
+
+  /**
+   * /history_stats command - show chat history statistics
+   */
+  private async handleHistoryStats(ctx: Context): Promise<void> {
+    try {
+      const stats = await Promise.resolve(chatHistoryDB.getStats());
+
+      if (stats.length === 0) {
+        await ctx.reply('📊 No chat history stored yet.');
+        return;
+      }
+
+      const telegramStats: any = stats.find((s: any) => s.platform === 'telegram');
+      if (!telegramStats) {
+        await ctx.reply('📊 No Telegram chat history stored yet.');
+        return;
+      }
+
+      const formatDate = (timestamp: number) => {
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+      };
+
+      const response =
+        '📊 *Chat History Statistics*\n\n' +
+        `*Messages stored:* ${telegramStats.message_count.toLocaleString()}\n` +
+        `*Chats:* ${telegramStats.channel_count}\n` +
+        `*Users:* ${telegramStats.user_count}\n` +
+        `*First message:* ${formatDate(telegramStats.earliest_message)}\n` +
+        `*Latest message:* ${formatDate(telegramStats.latest_message)}\n\n` +
+        '_Use /search <query> to search messages._';
+
+      await ctx.reply(response, { parse_mode: 'Markdown' });
+    } catch (error) {
+      logger.error('Error getting chat history stats:', error);
+      await ctx.reply('❌ Failed to get chat history statistics');
+    }
+  }
+
+  /**
    * Handle callback queries (button presses)
    */
   private async handleCallback(ctx: Context): Promise<void> {
@@ -462,6 +572,8 @@ export class TelegramAdapter implements ChatAdapter {
     'status',
     'clear',
     'stop',
+    'search',
+    'history_stats',
   ]);
 
   /**
@@ -487,6 +599,37 @@ export class TelegramAdapter implements ChatAdapter {
     }
 
     logger.info(`Received message from ${chatId}: "${text.substring(0, 50)}..."`);
+
+    // Store message in chat history
+    try {
+      let userName = undefined;
+      if (ctx.from) {
+        userName = ctx.from.first_name || ctx.from.username;
+        if (ctx.from.last_name) {
+          userName = `${userName} ${ctx.from.last_name}`;
+        }
+      }
+
+      const messageId =
+        ctx.message && 'message_id' in ctx.message ? String(ctx.message.message_id) : '';
+      const timestamp =
+        ctx.message && 'date' in ctx.message ? ctx.message.date : Math.floor(Date.now() / 1000);
+
+      chatHistoryDB.storeMessage({
+        platform: 'telegram',
+        channel_id: chatId,
+        user_id: userId,
+        user_name: userName,
+        message_id: messageId,
+        message_text: text,
+        timestamp: timestamp,
+      });
+
+      logger.debug(`Stored message in chat history: ${messageId}`);
+    } catch (error) {
+      logger.error('Failed to store message in chat history:', error);
+      // Don't fail the whole message handling if storage fails
+    }
 
     // Get or create session
     let session = sessionManager.get(chatId);
