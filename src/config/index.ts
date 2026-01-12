@@ -46,6 +46,9 @@ export interface Config {
   sessionTimeoutMinutes: number;
   sessionPersistDir: string;
 
+  // Database
+  postgresUrl: string | null;
+
   // Logging
   logLevel: string;
 }
@@ -103,6 +106,9 @@ export const config: Config = {
   // Sessions
   sessionTimeoutMinutes: parseInt(process.env.SESSION_TIMEOUT_MINUTES || '30', 10),
   sessionPersistDir: expandHome(process.env.SESSION_PERSIST_DIR || './sessions'),
+
+  // Database
+  postgresUrl: process.env.POSTGRES_URL || null,
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
