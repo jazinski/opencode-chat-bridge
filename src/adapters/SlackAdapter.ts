@@ -782,18 +782,18 @@ export class SlackAdapter implements ChatAdapter {
         return;
       }
 
-      // Get or create session
+      // Get or create session (for private ask, don't set up output handlers)
       let session = sessionManager.get(chatId);
       if (!session) {
         const restored = sessionManager.restore(chatId);
         if (restored) {
           session = restored;
-          this.setupSessionOutput(channel, chatId, session);
+          // Don't setup session output for private ask - we want ephemeral response only
         }
       }
       if (!session) {
         session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
-        this.setupSessionOutput(channel, chatId, session);
+        // Don't setup session output for private ask - we want ephemeral response only
       }
 
       // Start session if not running
@@ -1076,19 +1076,19 @@ export class SlackAdapter implements ChatAdapter {
       // Format messages for AI summarization
       const contextText = this.formatMessagesForSummary(messages);
 
-      // Get or create session
+      // Get or create session (for private summary, don't set up output handlers)
       const chatId = `${channel}-${userId}`;
       let session = sessionManager.get(chatId);
       if (!session) {
         const restored = sessionManager.restore(chatId);
         if (restored) {
           session = restored;
-          this.setupSessionOutput(channel, chatId, session);
+          // Don't setup session output for private summary - we want ephemeral response only
         }
       }
       if (!session) {
         session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
-        this.setupSessionOutput(channel, chatId, session);
+        // Don't setup session output for private summary - we want ephemeral response only
       }
 
       if (!session.isRunning()) {
