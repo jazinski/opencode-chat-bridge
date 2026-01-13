@@ -1,7 +1,4 @@
 // Jest setup file for global test configuration
-// Set test timeout
-jest.setTimeout(10000);
-
 // Mock environment variables for tests
 process.env.NODE_ENV = 'test';
 process.env.API_KEY = 'test-api-key';

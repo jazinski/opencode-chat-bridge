@@ -34,6 +34,13 @@ abstract class ChatHistoryBackend {
     limit?: number,
     threadId?: string
   ): Promise<ChatMessage[]>;
+  abstract getMessagesByTimeRange(
+    platform: string,
+    channelId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit?: number
+  ): Promise<ChatMessage[]>;
   abstract searchMessages(
     query: string,
     platform?: string,
@@ -170,12 +177,37 @@ class SQLiteChatHistory extends ChatHistoryBackend {
     return stmt.all(...params) as ChatMessage[];
   }
 
+  async getMessagesByTimeRange(
+    platform: string,
+    channelId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit: number = 1000
+  ): Promise<ChatMessage[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM messages
+      WHERE platform = ? AND channel_id = ?
+        AND timestamp >= ? AND timestamp <= ?
+      ORDER BY timestamp ASC
+      LIMIT ?
+    `);
+
+    return stmt.all(platform, channelId, startTimestamp, endTimestamp, limit) as ChatMessage[];
+  }
+
   async searchMessages(
     query: string,
     platform?: string,
     channelId?: string,
     limit: number = 20
   ): Promise<SearchResult[]> {
+    // Try FTS5 search with OR operator for more flexible matching
+    // Convert query to FTS5 OR query: "word1 OR word2 OR word3"
+    const ftsQuery = query
+      .split(/\s+/)
+      .filter((w) => w.length > 0)
+      .join(' OR ');
+
     let sql = `
       SELECT 
         m.*,
@@ -185,7 +217,7 @@ class SQLiteChatHistory extends ChatHistoryBackend {
       JOIN messages m ON messages_fts.rowid = m.id
       WHERE messages_fts MATCH ?
     `;
-    const params: any[] = [query];
+    const params: any[] = [ftsQuery];
 
     if (platform) {
       sql += ` AND m.platform = ?`;
@@ -200,8 +232,84 @@ class SQLiteChatHistory extends ChatHistoryBackend {
     sql += ` ORDER BY rank LIMIT ?`;
     params.push(limit);
 
-    const stmt = this.db.prepare(sql);
-    return stmt.all(...params) as SearchResult[];
+    try {
+      const stmt = this.db.prepare(sql);
+      const results = stmt.all(...params) as SearchResult[];
+
+      // If FTS returns no results, fallback to LIKE search
+      if (results.length === 0) {
+        logger.debug('FTS search returned no results, falling back to LIKE search');
+
+        const words = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
+        if (words.length > 0) {
+          let fallbackSql = `
+            SELECT 
+              *,
+              1.0 as relevance,
+              substr(message_text, 1, 100) || '...' as snippet
+            FROM messages
+            WHERE (${words.map(() => `LOWER(message_text) LIKE ?`).join(' OR ')})
+          `;
+          const fallbackParams: any[] = words.map((w) => `%${w}%`);
+
+          if (platform) {
+            fallbackSql += ` AND platform = ?`;
+            fallbackParams.push(platform);
+          }
+
+          if (channelId) {
+            fallbackSql += ` AND channel_id = ?`;
+            fallbackParams.push(channelId);
+          }
+
+          fallbackSql += ` ORDER BY timestamp DESC LIMIT ?`;
+          fallbackParams.push(limit);
+
+          const fallbackStmt = this.db.prepare(fallbackSql);
+          return fallbackStmt.all(...fallbackParams) as SearchResult[];
+        }
+      }
+
+      return results;
+    } catch (error) {
+      logger.error('FTS search error, falling back to LIKE:', error);
+
+      // Fallback to simple LIKE search on error
+      const words = query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 2);
+      if (words.length === 0) return [];
+
+      let fallbackSql = `
+        SELECT 
+          *,
+          1.0 as relevance,
+          substr(message_text, 1, 100) || '...' as snippet
+        FROM messages
+        WHERE (${words.map(() => `LOWER(message_text) LIKE ?`).join(' OR ')})
+      `;
+      const fallbackParams: any[] = words.map((w) => `%${w}%`);
+
+      if (platform) {
+        fallbackSql += ` AND platform = ?`;
+        fallbackParams.push(platform);
+      }
+
+      if (channelId) {
+        fallbackSql += ` AND channel_id = ?`;
+        fallbackParams.push(channelId);
+      }
+
+      fallbackSql += ` ORDER BY timestamp DESC LIMIT ?`;
+      fallbackParams.push(limit);
+
+      const fallbackStmt = this.db.prepare(fallbackSql);
+      return fallbackStmt.all(...fallbackParams) as SearchResult[];
+    }
   }
 
   async getMessageContext(
@@ -422,6 +530,32 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
     }
   }
 
+  async getMessagesByTimeRange(
+    platform: string,
+    channelId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit: number = 1000
+  ): Promise<ChatMessage[]> {
+    await this.ensureInitialized();
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `
+        SELECT * FROM messages
+        WHERE platform = $1 AND channel_id = $2
+          AND timestamp >= $3 AND timestamp <= $4
+        ORDER BY timestamp ASC
+        LIMIT $5
+      `,
+        [platform, channelId, startTimestamp, endTimestamp, limit]
+      );
+      return result.rows as ChatMessage[];
+    } finally {
+      client.release();
+    }
+  }
+
   async searchMessages(
     query: string,
     platform?: string,
@@ -431,14 +565,15 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
     await this.ensureInitialized();
     const client = await this.pool.connect();
     try {
+      // Try full-text search first with websearch_to_tsquery (more flexible, supports OR)
       let sql = `
         SELECT 
           *,
-          ts_rank(to_tsvector('english', message_text), plainto_tsquery('english', $1)) as relevance,
-          ts_headline('english', message_text, plainto_tsquery('english', $1), 
+          ts_rank(to_tsvector('english', message_text), websearch_to_tsquery('english', $1)) as relevance,
+          ts_headline('english', message_text, websearch_to_tsquery('english', $1), 
             'MaxWords=20, MinWords=10, ShortWord=3, HighlightAll=FALSE, MaxFragments=1') as snippet
         FROM messages
-        WHERE to_tsvector('english', message_text) @@ plainto_tsquery('english', $1)
+        WHERE to_tsvector('english', message_text) @@ websearch_to_tsquery('english', $1)
       `;
       const params: any[] = [query];
       let paramIndex = 2;
@@ -458,7 +593,50 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
       sql += ` ORDER BY relevance DESC LIMIT $${paramIndex}`;
       params.push(limit);
 
-      const result = await client.query(sql, params);
+      let result = await client.query(sql, params);
+
+      // If FTS returns no results, fallback to case-insensitive pattern matching
+      if (result.rows.length === 0) {
+        logger.debug('FTS search returned no results, falling back to ILIKE search');
+
+        // Split query into words and search for any of them
+        const words = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
+
+        if (words.length > 0) {
+          // Build ILIKE conditions for each word
+          let fallbackSql = `
+            SELECT 
+              *,
+              1.0 as relevance,
+              SUBSTRING(message_text, 1, 100) || '...' as snippet
+            FROM messages
+            WHERE (${words.map((_, i) => `LOWER(message_text) LIKE $${i + 1}`).join(' OR ')})
+          `;
+          const fallbackParams: any[] = words.map((w) => `%${w}%`);
+          paramIndex = words.length + 1;
+
+          if (platform) {
+            fallbackSql += ` AND platform = $${paramIndex}`;
+            fallbackParams.push(platform);
+            paramIndex++;
+          }
+
+          if (channelId) {
+            fallbackSql += ` AND channel_id = $${paramIndex}`;
+            fallbackParams.push(channelId);
+            paramIndex++;
+          }
+
+          fallbackSql += ` ORDER BY timestamp DESC LIMIT $${paramIndex}`;
+          fallbackParams.push(limit);
+
+          result = await client.query(fallbackSql, fallbackParams);
+        }
+      }
+
       return result.rows as SearchResult[];
     } finally {
       client.release();
@@ -693,6 +871,22 @@ export class ChatHistoryDB {
     threadId?: string
   ): ChatMessage[] | Promise<ChatMessage[]> {
     return this.backend.getRecentMessages(platform, channelId, limit, threadId);
+  }
+
+  getMessagesByTimeRange(
+    platform: string,
+    channelId: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    limit: number = 1000
+  ): ChatMessage[] | Promise<ChatMessage[]> {
+    return this.backend.getMessagesByTimeRange(
+      platform,
+      channelId,
+      startTimestamp,
+      endTimestamp,
+      limit
+    );
   }
 
   searchMessages(

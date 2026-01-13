@@ -7,7 +7,7 @@ import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 import type { Session } from '@/sessions/Session.js';
-import { getChatHistoryDB } from '@/database/ChatHistory.js';
+import { getChatHistoryDB, type ChatMessage } from '@/database/ChatHistory.js';
 
 const { App, LogLevel } = slack;
 const chatHistoryDB = getChatHistoryDB();
@@ -101,6 +101,10 @@ export class SlackAdapter implements ChatAdapter {
     this.app.command('/ai-search', this.handleSearch.bind(this));
     this.app.command('/ai-history-stats', this.handleHistoryStats.bind(this));
     this.app.command('/ask', this.handleAsk.bind(this));
+    this.app.command('/ask-public', this.handleAskPublic.bind(this));
+    this.app.command('/ai-search-public', this.handleSearchPublic.bind(this));
+    this.app.command('/ai-summary', this.handleSummary.bind(this));
+    this.app.command('/ai-summary-public', this.handleSummaryPublic.bind(this));
 
     // Interactive button handler
     this.app.action(/^switch_project_/, this.handleProjectSwitch.bind(this));
@@ -280,9 +284,13 @@ export class SlackAdapter implements ChatAdapter {
         `/ai-status - Show session status\n` +
         `/clear - Clear/reset session\n` +
         `/stop - Stop current operation\n` +
-        `/ai-search <query> - Search chat history\n` +
+        `/ai-search <query> - Search chat history (private)\n` +
+        `/ai-search-public <query> - Search chat history (visible to channel)\n` +
         `/ai-history-stats - View chat history statistics\n` +
-        `/ask <question> - Ask questions about chat history\n` +
+        `/ask <question> - Ask AI about chat history (private)\n` +
+        `/ask-public <question> - Ask AI about chat history (visible to channel)\n` +
+        `/ai-summary <period> - Generate AI summary (private)\n` +
+        `/ai-summary-public <period> - Generate AI summary (visible to channel)\n` +
         `/help - Show this help\n\n` +
         `Send any text to interact with me!`,
     });
@@ -565,6 +573,7 @@ export class SlackAdapter implements ChatAdapter {
           '🔍 *Search Chat History*\n\n' +
           'Usage: `/ai-search <query>`\n\n' +
           'Example: `/ai-search database migration`',
+        response_type: 'ephemeral',
       });
       return;
     }
@@ -578,6 +587,7 @@ export class SlackAdapter implements ChatAdapter {
       if (results.length === 0) {
         await respond({
           text: `🔍 No results found for "${query}"`,
+          response_type: 'ephemeral',
         });
         return;
       }
@@ -605,10 +615,16 @@ export class SlackAdapter implements ChatAdapter {
 
       response += '_Use `/ai-history-stats` to see storage statistics._';
 
-      await respond({ text: response });
+      await respond({
+        text: response,
+        response_type: 'ephemeral',
+      });
     } catch (error) {
       logger.error('Error searching chat history:', error);
-      await respond({ text: '❌ Failed to search chat history' });
+      await respond({
+        text: '❌ Failed to search chat history',
+        response_type: 'ephemeral',
+      });
     }
   }
 
@@ -624,6 +640,7 @@ export class SlackAdapter implements ChatAdapter {
       if (stats.length === 0) {
         await respond({
           text: '📊 No chat history stored yet.',
+          response_type: 'ephemeral',
         });
         return;
       }
@@ -632,6 +649,7 @@ export class SlackAdapter implements ChatAdapter {
       if (!slackStats) {
         await respond({
           text: '📊 No Slack chat history stored yet.',
+          response_type: 'ephemeral',
         });
         return;
       }
@@ -654,10 +672,16 @@ export class SlackAdapter implements ChatAdapter {
         `*Latest message:* ${formatDate(slackStats.latest_message)}\n\n` +
         '_Use `/ai-search <query>` to search messages._';
 
-      await respond({ text: response });
+      await respond({
+        text: response,
+        response_type: 'ephemeral',
+      });
     } catch (error) {
       logger.error('Error getting chat history stats:', error);
-      await respond({ text: '❌ Failed to get chat history statistics' });
+      await respond({
+        text: '❌ Failed to get chat history statistics',
+        response_type: 'ephemeral',
+      });
     }
   }
 
@@ -677,6 +701,7 @@ export class SlackAdapter implements ChatAdapter {
           '• `/ask what did we discuss about databases yesterday?`\n' +
           '• `/ask summarize our conversation about authentication`\n' +
           '• `/ask what bugs did we talk about last week?`',
+        response_type: 'ephemeral',
       });
       return;
     }
@@ -692,6 +717,7 @@ export class SlackAdapter implements ChatAdapter {
       if (!context) {
         await respond({
           text: "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/ai-search` to search for keywords.",
+          response_type: 'ephemeral',
         });
         return;
       }
@@ -722,19 +748,455 @@ export class SlackAdapter implements ChatAdapter {
         `Relevant chat history:\n${context}\n\n` +
         `Please provide a helpful answer based on the conversation history above.`;
 
-      // Send initial status
-      await respond({ text: 'Analyzing...' });
+      // Send initial status (ephemeral - only visible to user)
+      await respond({
+        text: '🤔 Analyzing chat history...',
+        response_type: 'ephemeral',
+      });
 
       // Use synchronous message to get immediate response
       const response = await session.sendMessageSync(augmentedPrompt);
 
       await respond({
         text: response.text,
+        response_type: 'ephemeral',
       });
     } catch (error) {
       logger.error('Error processing /ask command:', error);
-      await respond({ text: '❌ Failed to process your question. Please try again.' });
+      await respond({
+        text: '❌ Failed to process your question. Please try again.',
+        response_type: 'ephemeral',
+      });
     }
+  }
+
+  /**
+   * /ask-public command - Ask questions about chat history using RAG (visible to channel)
+   */
+  private async handleAskPublic({ command, ack, respond, say }: any): Promise<void> {
+    await ack();
+
+    const question = command.text.trim();
+    if (!question) {
+      await respond({
+        text:
+          '🤔 *Ask About Chat History (Public)*\n\n' +
+          'Usage: `/ask-public <question>`\n\n' +
+          'Examples:\n' +
+          '• `/ask-public what did we discuss about databases yesterday?`\n' +
+          '• `/ask-public summarize our conversation about authentication`\n' +
+          '• `/ask-public what bugs did we talk about last week?`\n\n' +
+          '_Note: Response will be visible to everyone in the channel._',
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    try {
+      const channel = command.channel_id;
+      const userId = command.user_id;
+      const chatId = `${channel}-${userId}`;
+
+      // Search for relevant context
+      const context = await this.getChatHistoryContext(channel, question);
+
+      if (!context) {
+        await respond({
+          text: "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/ai-search` to search for keywords.",
+          response_type: 'ephemeral',
+        });
+        return;
+      }
+
+      // Get or create session
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(channel, chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(channel, chatId, session);
+      }
+
+      // Start session if not running
+      if (!session.isRunning()) {
+        await session.start();
+      }
+
+      // Create augmented prompt with chat history context
+      const augmentedPrompt =
+        `Based on our previous chat history, please answer this question:\n\n` +
+        `Question: ${question}\n\n` +
+        `Relevant chat history:\n${context}\n\n` +
+        `Please provide a helpful answer based on the conversation history above.`;
+
+      // Send initial status (ephemeral)
+      await respond({
+        text: '🤔 Analyzing chat history...',
+        response_type: 'ephemeral',
+      });
+
+      // Use synchronous message to get immediate response
+      const response = await session.sendMessageSync(augmentedPrompt);
+
+      // Post public response to channel
+      const userName = await this.getUserName(userId);
+      await say({
+        text: `*${userName} asked:* ${question}\n\n${response.text}`,
+        channel: channel,
+      });
+    } catch (error) {
+      logger.error('Error processing /ask-public command:', error);
+      await respond({
+        text: '❌ Failed to process your question. Please try again.',
+        response_type: 'ephemeral',
+      });
+    }
+  }
+
+  /**
+   * /ai-search-public command - search chat history (visible to channel)
+   */
+  private async handleSearchPublic({ command, ack, respond, say }: any): Promise<void> {
+    await ack();
+
+    const query = command.text.trim();
+    if (!query) {
+      await respond({
+        text:
+          '🔍 *Search Chat History (Public)*\n\n' +
+          'Usage: `/ai-search-public <query>`\n\n' +
+          'Example: `/ai-search-public database migration`\n\n' +
+          '_Note: Results will be visible to everyone in the channel._',
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    try {
+      const channelId = command.channel_id;
+      const userId = command.user_id;
+      const results = await Promise.resolve(
+        chatHistoryDB.searchMessages(query, 'slack', channelId, 10)
+      );
+
+      if (results.length === 0) {
+        await respond({
+          text: `🔍 No results found for "${query}"`,
+          response_type: 'ephemeral',
+        });
+        return;
+      }
+
+      const formatTimestamp = (timestamp: number) => {
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
+      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*\n\n`;
+
+      for (const result of results) {
+        const userName = result.user_name || result.user_id;
+        const time = formatTimestamp(result.timestamp);
+        // Remove HTML tags from snippet (FTS adds <b> tags)
+        const snippet = result.snippet.replace(/<\/?b>/g, '*');
+
+        response += `*${userName}* (${time})\n${snippet}\n\n`;
+      }
+
+      response += '_Use `/ai-history-stats` to see storage statistics._';
+
+      // Post public response to channel
+      const userName = await this.getUserName(userId);
+      await say({
+        text: `*${userName} searched for:* "${query}"\n\n${response}`,
+        channel: channelId,
+      });
+    } catch (error) {
+      logger.error('Error searching chat history:', error);
+      await respond({
+        text: '❌ Failed to search chat history',
+        response_type: 'ephemeral',
+      });
+    }
+  }
+
+  /**
+   * /ai-summary command - Generate AI summary of chat history for a time period (private)
+   */
+  private async handleSummary({ command, ack, respond }: any): Promise<void> {
+    await ack();
+
+    const args = command.text.trim().toLowerCase();
+    const validPeriods = ['today', 'daily', 'yesterday', 'week', 'weekly', 'month', 'monthly'];
+
+    if (!args || !validPeriods.includes(args)) {
+      await respond({
+        text:
+          '📊 *AI Chat Summary*\n\n' +
+          'Usage: `/ai-summary <period>`\n\n' +
+          'Periods:\n' +
+          '• `today` or `daily` - Summary of today\n' +
+          '• `yesterday` - Summary of yesterday\n' +
+          '• `week` or `weekly` - Summary of this week\n' +
+          '• `month` or `monthly` - Summary of this month\n\n' +
+          'Example: `/ai-summary today`',
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    try {
+      const channel = command.channel_id;
+      const userId = command.user_id;
+
+      // Calculate time range based on period
+      const { start, end, periodLabel } = this.getTimeRange(args);
+
+      // Get messages from the time period
+      const messages = await Promise.resolve(
+        chatHistoryDB.getMessagesByTimeRange('slack', channel, start, end, 500)
+      );
+
+      if (messages.length === 0) {
+        await respond({
+          text: `📭 No messages found for ${periodLabel}.`,
+          response_type: 'ephemeral',
+        });
+        return;
+      }
+
+      // Send initial status
+      await respond({
+        text: `📊 Generating summary for ${periodLabel} (${messages.length} messages)...`,
+        response_type: 'ephemeral',
+      });
+
+      // Format messages for AI summarization
+      const contextText = this.formatMessagesForSummary(messages);
+
+      // Get or create session
+      const chatId = `${channel}-${userId}`;
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(channel, chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(channel, chatId, session);
+      }
+
+      if (!session.isRunning()) {
+        await session.start();
+      }
+
+      // Create summarization prompt
+      const summaryPrompt =
+        `Please provide a comprehensive summary of the following chat conversation from ${periodLabel}.\n\n` +
+        `Include:\n` +
+        `1. Main topics discussed\n` +
+        `2. Key decisions or conclusions\n` +
+        `3. Action items or tasks mentioned\n` +
+        `4. Important questions raised\n\n` +
+        `Chat history (${messages.length} messages):\n${contextText}\n\n` +
+        `Please organize the summary in a clear, structured format.`;
+
+      const response = await session.sendMessageSync(summaryPrompt);
+
+      await respond({
+        text: `📊 *Summary for ${periodLabel}*\n\n${response.text}`,
+        response_type: 'ephemeral',
+      });
+    } catch (error) {
+      logger.error('Error generating chat summary:', error);
+      await respond({
+        text: '❌ Failed to generate chat summary',
+        response_type: 'ephemeral',
+      });
+    }
+  }
+
+  /**
+   * /ai-summary-public command - Generate AI summary visible to channel
+   */
+  private async handleSummaryPublic({ command, ack, respond, say }: any): Promise<void> {
+    await ack();
+
+    const args = command.text.trim().toLowerCase();
+    const validPeriods = ['today', 'daily', 'yesterday', 'week', 'weekly', 'month', 'monthly'];
+
+    if (!args || !validPeriods.includes(args)) {
+      await respond({
+        text:
+          '📊 *AI Chat Summary (Public)*\n\n' +
+          'Usage: `/ai-summary-public <period>`\n\n' +
+          'Periods:\n' +
+          '• `today` or `daily` - Summary of today\n' +
+          '• `yesterday` - Summary of yesterday\n' +
+          '• `week` or `weekly` - Summary of this week\n' +
+          '• `month` or `monthly` - Summary of this month\n\n' +
+          'Example: `/ai-summary-public today`',
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    try {
+      const channel = command.channel_id;
+      const userId = command.user_id;
+      const userName = await this.getUserName(userId);
+
+      // Calculate time range
+      const { start, end, periodLabel } = this.getTimeRange(args);
+
+      // Get messages from the time period
+      const messages = await Promise.resolve(
+        chatHistoryDB.getMessagesByTimeRange('slack', channel, start, end, 500)
+      );
+
+      if (messages.length === 0) {
+        await respond({
+          text: `📭 No messages found for ${periodLabel}.`,
+          response_type: 'ephemeral',
+        });
+        return;
+      }
+
+      // Send initial status (private)
+      await respond({
+        text: `📊 Generating summary for ${periodLabel} (${messages.length} messages)...`,
+        response_type: 'ephemeral',
+      });
+
+      // Format messages for AI summarization
+      const contextText = this.formatMessagesForSummary(messages);
+
+      // Get or create session
+      const chatId = `${channel}-${userId}`;
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(channel, chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(channel, chatId, session);
+      }
+
+      if (!session.isRunning()) {
+        await session.start();
+      }
+
+      // Create summarization prompt
+      const summaryPrompt =
+        `Please provide a comprehensive summary of the following chat conversation from ${periodLabel}.\n\n` +
+        `Include:\n` +
+        `1. Main topics discussed\n` +
+        `2. Key decisions or conclusions\n` +
+        `3. Action items or tasks mentioned\n` +
+        `4. Important questions raised\n\n` +
+        `Chat history (${messages.length} messages):\n${contextText}\n\n` +
+        `Please organize the summary in a clear, structured format.`;
+
+      const response = await session.sendMessageSync(summaryPrompt);
+
+      // Post summary publicly
+      await say({
+        channel: channel,
+        text: `📊 **${userName} requested summary for ${periodLabel}**\n\n${response.text}`,
+      });
+    } catch (error) {
+      logger.error('Error generating chat summary:', error);
+      await respond({
+        text: '❌ Failed to generate chat summary',
+        response_type: 'ephemeral',
+      });
+    }
+  }
+
+  /**
+   * Calculate time range for summary periods
+   */
+  private getTimeRange(period: string): { start: number; end: number; periodLabel: string } {
+    const now = new Date();
+    let start: Date;
+    let end: Date = now;
+    let periodLabel: string;
+
+    switch (period) {
+      case 'today':
+      case 'daily':
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        periodLabel = 'today';
+        break;
+
+      case 'yesterday':
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        periodLabel = 'yesterday';
+        break;
+
+      case 'week':
+      case 'weekly':
+        const dayOfWeek = now.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Monday = start of week
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysToMonday, 0, 0, 0);
+        periodLabel = 'this week';
+        break;
+
+      case 'month':
+      case 'monthly':
+        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+        periodLabel = 'this month';
+        break;
+
+      default:
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        periodLabel = 'today';
+    }
+
+    return {
+      start: Math.floor(start.getTime() / 1000),
+      end: Math.floor(end.getTime() / 1000),
+      periodLabel,
+    };
+  }
+
+  /**
+   * Format messages for summary context
+   */
+  private formatMessagesForSummary(messages: ChatMessage[]): string {
+    let context = '';
+
+    for (const msg of messages) {
+      const date = new Date(msg.timestamp * 1000);
+      const timeStr = date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const userName = msg.user_name || msg.user_id;
+      context += `[${timeStr}] ${userName}: ${msg.message_text}\n`;
+    }
+
+    return context;
   }
 
   /**
@@ -835,6 +1297,20 @@ export class SlackAdapter implements ChatAdapter {
     } catch (error) {
       logger.error('Error getting chat history context:', error);
       return null;
+    }
+  }
+
+  /**
+   * Get user's display name
+   */
+  private async getUserName(userId: string): Promise<string> {
+    try {
+      const client = this.app.client;
+      const userInfo = await client.users.info({ user: userId });
+      return userInfo.user?.real_name || userInfo.user?.name || userId;
+    } catch (error) {
+      logger.debug('Failed to fetch user info:', error);
+      return userId;
     }
   }
 

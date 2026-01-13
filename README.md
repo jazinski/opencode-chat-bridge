@@ -285,18 +285,22 @@ The install script creates two services:
 
 The Slack bot supports the following slash commands:
 
-| Command              | Description                                             |
-| -------------------- | ------------------------------------------------------- |
-| `/help`              | Show available commands                                 |
-| `/chat [new]`        | Start free chat mode (no project required)              |
-| `/projects`          | List available projects with buttons                    |
-| `/switch <name>`     | Switch to a different project                           |
-| `/ai-status`         | Show current session status                             |
-| `/clear`             | Clear/reset the current session                         |
-| `/stop`              | Interrupt current operation                             |
-| `/ai-search <query>` | Search chat history by keywords                         |
-| `/ai-history-stats`  | View chat history statistics                            |
-| `/ask <question>`    | Ask natural language questions about chat history (RAG) |
+| Command                       | Description                                                         |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `/help`                       | Show available commands                                             |
+| `/chat [new]`                 | Start free chat mode (no project required)                          |
+| `/projects`                   | List available projects with buttons                                |
+| `/switch <name>`              | Switch to a different project                                       |
+| `/ai-status`                  | Show current session status                                         |
+| `/clear`                      | Clear/reset the current session                                     |
+| `/stop`                       | Interrupt current operation                                         |
+| `/ai-search <query>`          | Search chat history by keywords (private - only you see it)         |
+| `/ai-search-public <query>`   | Search chat history by keywords (visible to channel)                |
+| `/ai-history-stats`           | View chat history statistics                                        |
+| `/ask <question>`             | Ask AI about chat history (private - only you see it)               |
+| `/ask-public <question>`      | Ask AI about chat history (visible to channel)                      |
+| `/ai-summary <period>`        | Generate AI summary of chat (private) - periods: today, week, month |
+| `/ai-summary-public <period>` | Generate AI summary of chat (visible to channel)                    |
 
 ## Slack Usage
 
