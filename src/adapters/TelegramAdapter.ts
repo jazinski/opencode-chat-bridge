@@ -4,6 +4,7 @@ import { ChatAdapter } from '@/adapters/BaseAdapter.js';
 import { sessionManager } from '@/sessions/SessionManager.js';
 import { chunkMessage } from '@/utils/messageFormatter.js';
 import { logger } from '@/utils/logger.js';
+import { analytics } from '@/utils/analytics.js';
 import config from '@/config';
 import fs from 'fs';
 import path from 'path';
@@ -430,6 +431,10 @@ export class TelegramAdapter implements ChatAdapter {
 
     try {
       const chatId = String(ctx.chat?.id);
+      const userId = String(ctx.from?.id);
+
+      // Track command execution
+      const finishTracking = analytics.trackCommand('ai-search', 'telegram', userId, chatId);
 
       // Parse filters from command text
       const filters = parseSearchFilters(commandText);
@@ -455,7 +460,12 @@ export class TelegramAdapter implements ChatAdapter {
         searchOptions.offset = offset;
       }
 
+      const searchStart = Date.now();
       const results = await Promise.resolve(chatHistoryDB.searchMessages(query, searchOptions));
+      const searchDuration = Date.now() - searchStart;
+
+      // Track search performance
+      analytics.trackSearch(query, 'telegram', results.length, searchDuration, userId, chatId);
 
       if (results.length === 0) {
         const filterDisplay = formatFiltersForDisplay(filters);
@@ -488,8 +498,14 @@ export class TelegramAdapter implements ChatAdapter {
       response += '_Use /ai-history-stats to see storage statistics._';
 
       await ctx.reply(response, { parse_mode: 'Markdown' });
+
+      // Finish tracking
+      finishTracking();
     } catch (error) {
       logger.error('Error searching chat history:', error);
+      const chatId = String(ctx.chat?.id);
+      const userId = String(ctx.from?.id);
+      analytics.trackCommandError('ai-search', 'telegram', error as Error, userId, chatId);
       await ctx.reply('❌ Failed to search chat history');
     }
   }

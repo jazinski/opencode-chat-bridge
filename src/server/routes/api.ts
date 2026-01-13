@@ -1,7 +1,11 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { sessionManager } from '@/sessions/SessionManager.js';
 import { logger } from '@/utils/logger.js';
+import { analytics } from '@/utils/analytics.js';
+import { getChatHistoryDB } from '@/database/ChatHistory.js';
 import config from '@/config';
+
+const chatHistoryDB = getChatHistoryDB();
 
 const router = express.Router();
 
@@ -24,11 +28,73 @@ function requireApiKey(req: Request, res: Response, next: NextFunction): void {
  * GET /api/health
  */
 router.get('/health', (_req: Request, res: Response) => {
+  const summary = analytics.getSummary();
+  const performance = analytics.getPerformanceMetrics();
+
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    sessions: sessionManager.count(),
+    sessions: {
+      active: sessionManager.count(),
+      persisted: sessionManager.listPersistedSessions().length,
+    },
+    analytics: {
+      totalEvents: summary.totalEvents,
+      totalCommands: summary.totalCommands,
+      uniqueUsers: summary.uniqueUsers.size,
+      platforms: Array.from(summary.platforms),
+      errorRate: summary.errorRate,
+    },
+    performance: {
+      avgSearchDurationMs: Math.round(performance.avgSearchDuration),
+      avgCommandDurationMs: Math.round(performance.avgCommandDuration),
+      slowSearches: performance.slowSearches,
+      slowCommands: performance.slowCommands,
+    },
   });
+});
+
+/**
+ * Get analytics and usage statistics
+ * GET /api/analytics
+ */
+router.get('/analytics', requireApiKey, (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string) || 100;
+  const command = req.query.command as string | undefined;
+  const platform = req.query.platform as string | undefined;
+
+  const summary = analytics.getSummary();
+  const performance = analytics.getPerformanceMetrics();
+  const commandStats = analytics.getCommandStats(command, platform);
+  const recentEvents = analytics.getRecentEvents(limit);
+
+  res.json({
+    summary: {
+      totalEvents: summary.totalEvents,
+      totalCommands: summary.totalCommands,
+      uniqueUsers: summary.uniqueUsers.size,
+      platforms: Array.from(summary.platforms),
+      commandsByPlatform: summary.commandsByPlatform,
+      errorRate: summary.errorRate,
+    },
+    performance,
+    commandStats: commandStats.slice(0, 20), // Top 20 commands
+    recentEvents,
+  });
+});
+
+/**
+ * Get chat history statistics
+ * GET /api/stats
+ */
+router.get('/stats', requireApiKey, async (_req: Request, res: Response) => {
+  try {
+    const stats = await chatHistoryDB.getStats();
+    res.json({ stats });
+  } catch (error) {
+    logger.error('Failed to get chat history stats:', error);
+    res.status(500).json({ error: 'Failed to get statistics' });
+  }
 });
 
 /**
