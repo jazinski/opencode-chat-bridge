@@ -8,7 +8,8 @@ import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 import type { Session } from '@/sessions/Session.js';
-import { getChatHistoryDB } from '@/database/ChatHistory.js';
+import { getChatHistoryDB, type SearchOptions } from '@/database/ChatHistory.js';
+import { parseSearchFilters, formatFiltersForDisplay } from '@/utils/filterParser.js';
 
 const chatHistoryDB = getChatHistoryDB();
 
@@ -99,11 +100,13 @@ export class TelegramAdapter implements ChatAdapter {
     this.bot.command('status', this.handleStatus.bind(this));
     this.bot.command('clear', this.handleClear.bind(this));
     this.bot.command('stop', this.handleStop.bind(this));
-    this.bot.command('search', this.handleSearch.bind(this));
-    this.bot.command('history_stats', this.handleHistoryStats.bind(this));
+    this.bot.command('ai_search', this.handleAiSearch.bind(this));
+    this.bot.command('ai-search', this.handleAiSearch.bind(this)); // Also support dash variant
+    this.bot.command('ai_history_stats', this.handleAiHistoryStats.bind(this));
+    this.bot.command('ai-history-stats', this.handleAiHistoryStats.bind(this)); // Also support dash variant
+    this.bot.command('ai_summary', this.handleAiSummary.bind(this));
+    this.bot.command('ai-summary', this.handleAiSummary.bind(this)); // Also support dash variant
     this.bot.command('ask', this.handleAsk.bind(this));
-    this.bot.command('search', this.handleSearch.bind(this));
-    this.bot.command('history_stats', this.handleHistoryStats.bind(this));
 
     // Callback query handler (for buttons)
     this.bot.on('callback_query', this.handleCallback.bind(this));
@@ -134,8 +137,9 @@ export class TelegramAdapter implements ChatAdapter {
         `/status - Show session status\n` +
         `/clear - Clear/reset session\n` +
         `/stop - Stop current operation\n` +
-        `/search <query> - Search chat history\n` +
-        `/history_stats - View chat history statistics\n` +
+        `/ai-search <query> - Search chat history (supports filters)\n` +
+        `/ai-history-stats - View chat history statistics\n` +
+        `/ai-summary [daily|weekly] - Generate AI summary of conversations\n` +
         `/ask <question> - Ask questions about chat history\n` +
         `/help - Show this help\n\n` +
         `Send any text to interact with me!`,
@@ -393,15 +397,32 @@ export class TelegramAdapter implements ChatAdapter {
   /**
    * /search command - search chat history
    */
-  private async handleSearch(ctx: Context): Promise<void> {
+  /**
+   * /ai-search command - search chat history with filters
+   */
+  private async handleAiSearch(ctx: Context): Promise<void> {
     const text = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
-    const query = text.replace('/search', '').trim();
+    const commandText = text.replace(/^\/ai[-_]search\s*/, '').trim();
 
-    if (!query) {
+    if (!commandText) {
       await ctx.reply(
-        '🔍 *Search Chat History*\n\n' +
-          'Usage: `/search <query>`\n\n' +
-          'Example: `/search database migration`',
+        '🔍 *AI Search - Chat History*\n\n' +
+          'Usage: `/ai-search <query> [filters]`\n\n' +
+          '*Available Filters:*\n' +
+          '• `--since <date>` - Messages after date\n' +
+          '• `--before <date>` - Messages before date\n' +
+          '• `--from <user>` - Messages from user\n' +
+          '• `--limit <number>` - Max results (default: 10)\n' +
+          '• `--offset <number>` - Skip results (pagination)\n\n' +
+          '*Date Formats:*\n' +
+          '• `today`, `yesterday`\n' +
+          '• `2 days ago`, `last 7 days`\n' +
+          '• ISO dates (e.g., `2024-01-15`)\n\n' +
+          '*Examples:*\n' +
+          '• `/ai-search database migration`\n' +
+          '• `/ai-search bug --since yesterday`\n' +
+          '• `/ai-search error --from @john --limit 5`\n' +
+          '• `/ai-search deployment --since 2 days ago --before today`',
         { parse_mode: 'Markdown' }
       );
       return;
@@ -409,12 +430,36 @@ export class TelegramAdapter implements ChatAdapter {
 
     try {
       const chatId = String(ctx.chat?.id);
-      const results = await Promise.resolve(
-        chatHistoryDB.searchMessages(query, { platform: 'telegram', channelId: chatId, limit: 10 })
-      );
+
+      // Parse filters from command text
+      const filters = parseSearchFilters(commandText);
+      const { query, since, before, from, limit, offset } = filters;
+
+      // Build search options
+      const searchOptions: SearchOptions = {
+        platform: 'telegram',
+        channelId: chatId,
+        limit: limit || 10,
+      };
+
+      if (since) {
+        searchOptions.sinceTimestamp = Math.floor(since.getTime() / 1000);
+      }
+      if (before) {
+        searchOptions.beforeTimestamp = Math.floor(before.getTime() / 1000);
+      }
+      if (from) {
+        searchOptions.userId = from;
+      }
+      if (offset) {
+        searchOptions.offset = offset;
+      }
+
+      const results = await Promise.resolve(chatHistoryDB.searchMessages(query, searchOptions));
 
       if (results.length === 0) {
-        await ctx.reply(`🔍 No results found for "${query}"`);
+        const filterDisplay = formatFiltersForDisplay(filters);
+        await ctx.reply(`🔍 No results found for "${query}"${filterDisplay}`);
         return;
       }
 
@@ -428,7 +473,8 @@ export class TelegramAdapter implements ChatAdapter {
         });
       };
 
-      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*\n\n`;
+      const filterDisplay = formatFiltersForDisplay(filters);
+      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*${filterDisplay}\n\n`;
 
       for (const result of results) {
         const userName = result.user_name || result.user_id;
@@ -439,7 +485,7 @@ export class TelegramAdapter implements ChatAdapter {
         response += `*${userName}* (${time})\n${snippet}\n\n`;
       }
 
-      response += '_Use /history\\_stats to see storage statistics._';
+      response += '_Use /ai-history-stats to see storage statistics._';
 
       await ctx.reply(response, { parse_mode: 'Markdown' });
     } catch (error) {
@@ -449,9 +495,9 @@ export class TelegramAdapter implements ChatAdapter {
   }
 
   /**
-   * /history_stats command - show chat history statistics
+   * /ai-history-stats command - show chat history statistics
    */
-  private async handleHistoryStats(ctx: Context): Promise<void> {
+  private async handleAiHistoryStats(ctx: Context): Promise<void> {
     try {
       const stats = await Promise.resolve(chatHistoryDB.getStats());
 
@@ -482,7 +528,7 @@ export class TelegramAdapter implements ChatAdapter {
         `*Users:* ${telegramStats.user_count}\n` +
         `*First message:* ${formatDate(telegramStats.earliest_message)}\n` +
         `*Latest message:* ${formatDate(telegramStats.latest_message)}\n\n` +
-        '_Use /search <query> to search messages._';
+        '_Use /ai-search <query> to search messages._';
 
       await ctx.reply(response, { parse_mode: 'Markdown' });
     } catch (error) {
@@ -526,7 +572,7 @@ export class TelegramAdapter implements ChatAdapter {
 
       if (searchResults.length === 0) {
         await ctx.reply(
-          "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/search` to search for keywords."
+          "🔍 I couldn't find any relevant chat history for your question. Try asking something else or use `/ai-search` to search for keywords."
         );
         return;
       }
@@ -585,6 +631,127 @@ export class TelegramAdapter implements ChatAdapter {
     } catch (error) {
       logger.error('Error processing /ask command:', error);
       await ctx.reply('❌ Failed to process your question. Please try again.');
+    }
+  }
+
+  /**
+   * /ai-summary command - Generate daily/weekly summaries
+   */
+  private async handleAiSummary(ctx: Context): Promise<void> {
+    const text = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const args = text.replace(/^\/ai[-_]summary\s*/, '').trim();
+
+    // Parse period argument (daily/weekly, default to daily)
+    const period = args.toLowerCase() || 'daily';
+
+    if (!['daily', 'weekly'].includes(period)) {
+      await ctx.reply(
+        '📊 *AI Summary*\n\n' +
+          'Usage: `/ai-summary [daily|weekly]`\n\n' +
+          'Examples:\n' +
+          "• `/ai-summary` - Summary of today's chat\n" +
+          "• `/ai-summary daily` - Summary of today's chat\n" +
+          '• `/ai-summary weekly` - Summary of last 7 days',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    try {
+      const chatId = String(ctx.chat?.id);
+      const userId = String(ctx.from?.id);
+
+      // Calculate date range
+      const now = new Date();
+      const since = new Date();
+
+      if (period === 'daily') {
+        since.setHours(0, 0, 0, 0); // Start of today
+      } else {
+        since.setDate(since.getDate() - 7); // 7 days ago
+        since.setHours(0, 0, 0, 0);
+      }
+
+      const sinceTimestamp = Math.floor(since.getTime() / 1000);
+
+      // Search for all messages in the period
+      const searchResults = await Promise.resolve(
+        chatHistoryDB.searchMessages('', {
+          platform: 'telegram',
+          channelId: chatId,
+          sinceTimestamp,
+          limit: 100, // Get more messages for better summary
+        })
+      );
+
+      if (searchResults.length === 0) {
+        await ctx.reply(`📊 No messages found for ${period} summary.`);
+        return;
+      }
+
+      // Build context from search results
+      const formatTimestamp = (timestamp: number) => {
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
+      let context = '';
+      for (const result of searchResults) {
+        const userName = result.user_name || result.user_id;
+        const time = formatTimestamp(result.timestamp);
+        context += `[${time}] ${userName}: ${result.message_text}\n\n`;
+      }
+
+      // Get or create session
+      let session = sessionManager.get(chatId);
+      if (!session) {
+        const restored = sessionManager.restore(chatId);
+        if (restored) {
+          session = restored;
+          this.setupSessionOutput(chatId, session);
+        }
+      }
+      if (!session) {
+        session = sessionManager.getOrCreate(chatId, userId, config.freeChatDir);
+        this.setupSessionOutput(chatId, session);
+      }
+
+      // Start session if not running
+      if (!session.isRunning()) {
+        await session.start();
+      }
+
+      // Create summarization prompt
+      const summaryPrompt =
+        `Please provide a concise summary of our ${period} chat history:\n\n` +
+        `Chat history (${searchResults.length} messages):\n${context}\n\n` +
+        `Please summarize:\n` +
+        `1. Main topics discussed\n` +
+        `2. Key decisions or conclusions\n` +
+        `3. Action items or follow-ups mentioned\n` +
+        `4. Notable questions or concerns\n\n` +
+        `Keep the summary brief and well-organized.`;
+
+      // Send initial status
+      await ctx.reply(`📊 Generating ${period} summary from ${searchResults.length} messages...`);
+
+      // Use synchronous message to get immediate response
+      const response = await session.sendMessageSync(summaryPrompt);
+
+      await ctx.reply(
+        `📊 *${period.charAt(0).toUpperCase() + period.slice(1)} Summary*\n\n${response.text}`,
+        {
+          parse_mode: 'Markdown',
+        }
+      );
+    } catch (error) {
+      logger.error('Error generating AI summary:', error);
+      await ctx.reply('❌ Failed to generate summary. Please try again.');
     }
   }
 
