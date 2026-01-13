@@ -23,6 +23,16 @@ export interface SearchResult extends ChatMessage {
   snippet: string;
 }
 
+export interface SearchOptions {
+  platform?: string;
+  channelId?: string;
+  userId?: string; // Filter by user_id or user_name
+  sinceTimestamp?: number; // Unix timestamp in seconds
+  beforeTimestamp?: number; // Unix timestamp in seconds
+  limit?: number;
+  offset?: number;
+}
+
 /**
  * Abstract base class for chat history storage
  */
@@ -41,12 +51,7 @@ abstract class ChatHistoryBackend {
     endTimestamp: number,
     limit?: number
   ): Promise<ChatMessage[]>;
-  abstract searchMessages(
-    query: string,
-    platform?: string,
-    channelId?: string,
-    limit?: number
-  ): Promise<SearchResult[]>;
+  abstract searchMessages(query: string, options?: SearchOptions): Promise<SearchResult[]>;
   abstract getMessageContext(
     platform: string,
     channelId: string,
@@ -195,12 +200,17 @@ class SQLiteChatHistory extends ChatHistoryBackend {
     return stmt.all(platform, channelId, startTimestamp, endTimestamp, limit) as ChatMessage[];
   }
 
-  async searchMessages(
-    query: string,
-    platform?: string,
-    channelId?: string,
-    limit: number = 20
-  ): Promise<SearchResult[]> {
+  async searchMessages(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+    const {
+      platform,
+      channelId,
+      userId,
+      sinceTimestamp,
+      beforeTimestamp,
+      limit = 20,
+      offset = 0,
+    } = options || {};
+
     // Try FTS5 search with OR operator for more flexible matching
     // Convert query to FTS5 OR query: "word1 OR word2 OR word3"
     const ftsQuery = query
@@ -229,8 +239,23 @@ class SQLiteChatHistory extends ChatHistoryBackend {
       params.push(channelId);
     }
 
-    sql += ` ORDER BY rank LIMIT ?`;
-    params.push(limit);
+    if (userId) {
+      sql += ` AND (m.user_id = ? OR LOWER(m.user_name) LIKE ?)`;
+      params.push(userId, `%${userId.toLowerCase()}%`);
+    }
+
+    if (sinceTimestamp !== undefined) {
+      sql += ` AND m.timestamp >= ?`;
+      params.push(sinceTimestamp);
+    }
+
+    if (beforeTimestamp !== undefined) {
+      sql += ` AND m.timestamp <= ?`;
+      params.push(beforeTimestamp);
+    }
+
+    sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
 
     try {
       const stmt = this.db.prepare(sql);
@@ -265,8 +290,23 @@ class SQLiteChatHistory extends ChatHistoryBackend {
             fallbackParams.push(channelId);
           }
 
-          fallbackSql += ` ORDER BY timestamp DESC LIMIT ?`;
-          fallbackParams.push(limit);
+          if (userId) {
+            fallbackSql += ` AND (user_id = ? OR LOWER(user_name) LIKE ?)`;
+            fallbackParams.push(userId, `%${userId.toLowerCase()}%`);
+          }
+
+          if (sinceTimestamp !== undefined) {
+            fallbackSql += ` AND timestamp >= ?`;
+            fallbackParams.push(sinceTimestamp);
+          }
+
+          if (beforeTimestamp !== undefined) {
+            fallbackSql += ` AND timestamp <= ?`;
+            fallbackParams.push(beforeTimestamp);
+          }
+
+          fallbackSql += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+          fallbackParams.push(limit, offset);
 
           const fallbackStmt = this.db.prepare(fallbackSql);
           return fallbackStmt.all(...fallbackParams) as SearchResult[];
@@ -304,8 +344,23 @@ class SQLiteChatHistory extends ChatHistoryBackend {
         fallbackParams.push(channelId);
       }
 
-      fallbackSql += ` ORDER BY timestamp DESC LIMIT ?`;
-      fallbackParams.push(limit);
+      if (userId) {
+        fallbackSql += ` AND (user_id = ? OR LOWER(user_name) LIKE ?)`;
+        fallbackParams.push(userId, `%${userId.toLowerCase()}%`);
+      }
+
+      if (sinceTimestamp !== undefined) {
+        fallbackSql += ` AND timestamp >= ?`;
+        fallbackParams.push(sinceTimestamp);
+      }
+
+      if (beforeTimestamp !== undefined) {
+        fallbackSql += ` AND timestamp <= ?`;
+        fallbackParams.push(beforeTimestamp);
+      }
+
+      fallbackSql += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+      fallbackParams.push(limit, offset);
 
       const fallbackStmt = this.db.prepare(fallbackSql);
       return fallbackStmt.all(...fallbackParams) as SearchResult[];
@@ -556,12 +611,17 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
     }
   }
 
-  async searchMessages(
-    query: string,
-    platform?: string,
-    channelId?: string,
-    limit: number = 20
-  ): Promise<SearchResult[]> {
+  async searchMessages(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+    const {
+      platform,
+      channelId,
+      userId,
+      sinceTimestamp,
+      beforeTimestamp,
+      limit = 20,
+      offset = 0,
+    } = options || {};
+
     await this.ensureInitialized();
     const client = await this.pool.connect();
     try {
@@ -590,8 +650,26 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
         paramIndex++;
       }
 
-      sql += ` ORDER BY relevance DESC LIMIT $${paramIndex}`;
-      params.push(limit);
+      if (userId) {
+        sql += ` AND (user_id = $${paramIndex} OR LOWER(user_name) LIKE $${paramIndex + 1})`;
+        params.push(userId, `%${userId.toLowerCase()}%`);
+        paramIndex += 2;
+      }
+
+      if (sinceTimestamp !== undefined) {
+        sql += ` AND timestamp >= $${paramIndex}`;
+        params.push(sinceTimestamp);
+        paramIndex++;
+      }
+
+      if (beforeTimestamp !== undefined) {
+        sql += ` AND timestamp <= $${paramIndex}`;
+        params.push(beforeTimestamp);
+        paramIndex++;
+      }
+
+      sql += ` ORDER BY relevance DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      params.push(limit, offset);
 
       let result = await client.query(sql, params);
 
@@ -630,8 +708,26 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
             paramIndex++;
           }
 
-          fallbackSql += ` ORDER BY timestamp DESC LIMIT $${paramIndex}`;
-          fallbackParams.push(limit);
+          if (userId) {
+            fallbackSql += ` AND (user_id = $${paramIndex} OR LOWER(user_name) LIKE $${paramIndex + 1})`;
+            fallbackParams.push(userId, `%${userId.toLowerCase()}%`);
+            paramIndex += 2;
+          }
+
+          if (sinceTimestamp !== undefined) {
+            fallbackSql += ` AND timestamp >= $${paramIndex}`;
+            fallbackParams.push(sinceTimestamp);
+            paramIndex++;
+          }
+
+          if (beforeTimestamp !== undefined) {
+            fallbackSql += ` AND timestamp <= $${paramIndex}`;
+            fallbackParams.push(beforeTimestamp);
+            paramIndex++;
+          }
+
+          fallbackSql += ` ORDER BY timestamp DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+          fallbackParams.push(limit, offset);
 
           result = await client.query(fallbackSql, fallbackParams);
         }
@@ -889,13 +985,8 @@ export class ChatHistoryDB {
     );
   }
 
-  searchMessages(
-    query: string,
-    platform?: string,
-    channelId?: string,
-    limit: number = 20
-  ): SearchResult[] | Promise<SearchResult[]> {
-    return this.backend.searchMessages(query, platform, channelId, limit);
+  searchMessages(query: string, options?: SearchOptions): SearchResult[] | Promise<SearchResult[]> {
+    return this.backend.searchMessages(query, options);
   }
 
   getMessageContext(

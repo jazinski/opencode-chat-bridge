@@ -410,7 +410,7 @@ export class TelegramAdapter implements ChatAdapter {
     try {
       const chatId = String(ctx.chat?.id);
       const results = await Promise.resolve(
-        chatHistoryDB.searchMessages(query, 'telegram', chatId, 10)
+        chatHistoryDB.searchMessages(query, { platform: 'telegram', channelId: chatId, limit: 10 })
       );
 
       if (results.length === 0) {
@@ -517,7 +517,11 @@ export class TelegramAdapter implements ChatAdapter {
 
       // Search for relevant context (up to 10 relevant messages)
       const searchResults = await Promise.resolve(
-        chatHistoryDB.searchMessages(question, 'telegram', chatId, 10)
+        chatHistoryDB.searchMessages(question, {
+          platform: 'telegram',
+          channelId: chatId,
+          limit: 10,
+        })
       );
 
       if (searchResults.length === 0) {

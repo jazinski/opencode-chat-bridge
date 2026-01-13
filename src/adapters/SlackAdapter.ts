@@ -7,7 +7,8 @@ import config from '@/config';
 import fs from 'fs';
 import path from 'path';
 import type { Session } from '@/sessions/Session.js';
-import { getChatHistoryDB, type ChatMessage } from '@/database/ChatHistory.js';
+import { getChatHistoryDB, type ChatMessage, type SearchOptions } from '@/database/ChatHistory.js';
+import { parseSearchFilters, formatFiltersForDisplay } from '@/utils/filterParser.js';
 
 const { App, LogLevel } = slack;
 const chatHistoryDB = getChatHistoryDB();
@@ -566,13 +567,21 @@ export class SlackAdapter implements ChatAdapter {
   private async handleSearch({ command, ack, respond }: any): Promise<void> {
     await ack();
 
-    const query = command.text.trim();
-    if (!query) {
+    const text = command.text.trim();
+    if (!text) {
       await respond({
         text:
           '🔍 *Search Chat History*\n\n' +
-          'Usage: `/ai-search <query>`\n\n' +
-          'Example: `/ai-search database migration`',
+          'Usage: `/ai-search <query> [options]`\n\n' +
+          'Examples:\n' +
+          '• `/ai-search database migration`\n' +
+          '• `/ai-search bug fix --since yesterday`\n' +
+          '• `/ai-search deployment --from @john --limit 5`\n\n' +
+          'Options:\n' +
+          '• `--since <date>` - Messages after date (e.g., "yesterday", "2 days ago")\n' +
+          '• `--before <date>` - Messages before date\n' +
+          '• `--from @user` - Messages from specific user\n' +
+          '• `--limit <n>` - Maximum results (default: 10)',
         response_type: 'ephemeral',
       });
       return;
@@ -580,13 +589,37 @@ export class SlackAdapter implements ChatAdapter {
 
     try {
       const channelId = command.channel_id;
+
+      // Parse filters from command text
+      const filters = parseSearchFilters(text);
+
+      // Build search options
+      const searchOptions: SearchOptions = {
+        platform: 'slack',
+        channelId,
+        limit: filters.limit || 10,
+        offset: filters.offset || 0,
+      };
+
+      if (filters.from) {
+        searchOptions.userId = filters.from;
+      }
+
+      if (filters.since) {
+        searchOptions.sinceTimestamp = Math.floor(filters.since.getTime() / 1000);
+      }
+
+      if (filters.before) {
+        searchOptions.beforeTimestamp = Math.floor(filters.before.getTime() / 1000);
+      }
+
       const results = await Promise.resolve(
-        chatHistoryDB.searchMessages(query, 'slack', channelId, 10)
+        chatHistoryDB.searchMessages(filters.query, searchOptions)
       );
 
       if (results.length === 0) {
         await respond({
-          text: `🔍 No results found for "${query}"`,
+          text: `🔍 No results found for "${filters.query}"${formatFiltersForDisplay(filters)}`,
           response_type: 'ephemeral',
         });
         return;
@@ -602,7 +635,7 @@ export class SlackAdapter implements ChatAdapter {
         });
       };
 
-      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*\n\n`;
+      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${filters.query}"*${formatFiltersForDisplay(filters)}\n\n`;
 
       for (const result of results) {
         const userName = result.user_name || result.user_id;
@@ -864,13 +897,21 @@ export class SlackAdapter implements ChatAdapter {
   private async handleSearchPublic({ command, ack, respond, say }: any): Promise<void> {
     await ack();
 
-    const query = command.text.trim();
-    if (!query) {
+    const text = command.text.trim();
+    if (!text) {
       await respond({
         text:
           '🔍 *Search Chat History (Public)*\n\n' +
-          'Usage: `/ai-search-public <query>`\n\n' +
-          'Example: `/ai-search-public database migration`\n\n' +
+          'Usage: `/ai-search-public <query> [options]`\n\n' +
+          'Examples:\n' +
+          '• `/ai-search-public database migration`\n' +
+          '• `/ai-search-public bug fix --since yesterday`\n' +
+          '• `/ai-search-public deployment --from @john --limit 5`\n\n' +
+          'Options:\n' +
+          '• `--since <date>` - Messages after date (e.g., "yesterday", "2 days ago")\n' +
+          '• `--before <date>` - Messages before date\n' +
+          '• `--from @user` - Messages from specific user\n' +
+          '• `--limit <n>` - Maximum results (default: 10)\n\n' +
           '_Note: Results will be visible to everyone in the channel._',
         response_type: 'ephemeral',
       });
@@ -880,13 +921,37 @@ export class SlackAdapter implements ChatAdapter {
     try {
       const channelId = command.channel_id;
       const userId = command.user_id;
+
+      // Parse filters from command text
+      const filters = parseSearchFilters(text);
+
+      // Build search options
+      const searchOptions: SearchOptions = {
+        platform: 'slack',
+        channelId,
+        limit: filters.limit || 10,
+        offset: filters.offset || 0,
+      };
+
+      if (filters.from) {
+        searchOptions.userId = filters.from;
+      }
+
+      if (filters.since) {
+        searchOptions.sinceTimestamp = Math.floor(filters.since.getTime() / 1000);
+      }
+
+      if (filters.before) {
+        searchOptions.beforeTimestamp = Math.floor(filters.before.getTime() / 1000);
+      }
+
       const results = await Promise.resolve(
-        chatHistoryDB.searchMessages(query, 'slack', channelId, 10)
+        chatHistoryDB.searchMessages(filters.query, searchOptions)
       );
 
       if (results.length === 0) {
         await respond({
-          text: `🔍 No results found for "${query}"`,
+          text: `🔍 No results found for "${filters.query}"${formatFiltersForDisplay(filters)}`,
           response_type: 'ephemeral',
         });
         return;
@@ -902,7 +967,7 @@ export class SlackAdapter implements ChatAdapter {
         });
       };
 
-      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${query}"*\n\n`;
+      let response = `🔍 *Found ${results.length} message${results.length > 1 ? 's' : ''} matching "${filters.query}"*${formatFiltersForDisplay(filters)}\n\n`;
 
       for (const result of results) {
         const userName = result.user_name || result.user_id;
@@ -918,7 +983,7 @@ export class SlackAdapter implements ChatAdapter {
       // Post public response to channel
       const userName = await this.getUserName(userId);
       await say({
-        text: `*${userName} searched for:* "${query}"\n\n${response}`,
+        text: `*${userName} searched for:* "${filters.query}"${formatFiltersForDisplay(filters)}\n\n${response}`,
         channel: channelId,
       });
     } catch (error) {
@@ -1238,7 +1303,7 @@ export class SlackAdapter implements ChatAdapter {
     try {
       // Search for relevant messages
       const searchResults = await Promise.resolve(
-        chatHistoryDB.searchMessages(query, 'slack', channel, 5)
+        chatHistoryDB.searchMessages(query, { platform: 'slack', channelId: channel, limit: 5 })
       );
 
       // Also get recent messages for general context
