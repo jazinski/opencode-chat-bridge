@@ -44,6 +44,12 @@ abstract class ChatHistoryBackend {
     limit?: number,
     threadId?: string
   ): Promise<ChatMessage[]>;
+  abstract getRecentMessagesWithTokenLimit(
+    platform: string,
+    channelId: string,
+    maxTokens: number,
+    threadId?: string
+  ): Promise<ChatMessage[]>;
   abstract getMessagesByTimeRange(
     platform: string,
     channelId: string,
@@ -180,6 +186,41 @@ class SQLiteChatHistory extends ChatHistoryBackend {
 
     const stmt = this.db.prepare(query);
     return stmt.all(...params) as ChatMessage[];
+  }
+
+  /**
+   * Estimate tokens for a message (rough approximation: ~4 chars per token)
+   */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  async getRecentMessagesWithTokenLimit(
+    platform: string,
+    channelId: string,
+    maxTokens: number,
+    threadId?: string
+  ): Promise<ChatMessage[]> {
+    // Fetch recent messages (more than we need, then trim)
+    const messages = await this.getRecentMessages(platform, channelId, 500, threadId);
+
+    // Build result from most recent, working backwards
+    const result: ChatMessage[] = [];
+    let tokenCount = 0;
+
+    for (const message of messages) {
+      const messageTokens = this.estimateTokens(message.message_text);
+
+      if (tokenCount + messageTokens > maxTokens && result.length > 0) {
+        break; // Stop when we hit the limit
+      }
+
+      result.push(message);
+      tokenCount += messageTokens;
+    }
+
+    // Reverse to get chronological order (oldest to newest)
+    return result.reverse();
   }
 
   async getMessagesByTimeRange(
@@ -585,6 +626,41 @@ class PostgreSQLChatHistory extends ChatHistoryBackend {
     }
   }
 
+  /**
+   * Estimate tokens for a message (rough approximation: ~4 chars per token)
+   */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  async getRecentMessagesWithTokenLimit(
+    platform: string,
+    channelId: string,
+    maxTokens: number,
+    threadId?: string
+  ): Promise<ChatMessage[]> {
+    // Fetch recent messages (more than we need, then trim)
+    const messages = await this.getRecentMessages(platform, channelId, 500, threadId);
+
+    // Build result from most recent, working backwards
+    const result: ChatMessage[] = [];
+    let tokenCount = 0;
+
+    for (const message of messages) {
+      const messageTokens = this.estimateTokens(message.message_text);
+
+      if (tokenCount + messageTokens > maxTokens && result.length > 0) {
+        break; // Stop when we hit the limit
+      }
+
+      result.push(message);
+      tokenCount += messageTokens;
+    }
+
+    // Reverse to get chronological order (oldest to newest)
+    return result.reverse();
+  }
+
   async getMessagesByTimeRange(
     platform: string,
     channelId: string,
@@ -967,6 +1043,15 @@ export class ChatHistoryDB {
     threadId?: string
   ): ChatMessage[] | Promise<ChatMessage[]> {
     return this.backend.getRecentMessages(platform, channelId, limit, threadId);
+  }
+
+  getRecentMessagesWithTokenLimit(
+    platform: string,
+    channelId: string,
+    maxTokens: number,
+    threadId?: string
+  ): ChatMessage[] | Promise<ChatMessage[]> {
+    return this.backend.getRecentMessagesWithTokenLimit(platform, channelId, maxTokens, threadId);
   }
 
   getMessagesByTimeRange(

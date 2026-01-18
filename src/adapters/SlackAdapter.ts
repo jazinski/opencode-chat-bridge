@@ -97,6 +97,8 @@ export class SlackAdapter implements ChatAdapter {
     this.app.command('/switch', this.handleSwitch.bind(this));
     this.app.command('/ai-status', this.handleStatus.bind(this));
     this.app.command('/clear', this.handleClear.bind(this));
+    this.app.command('/forget', this.handleForget.bind(this));
+    this.app.command('/session-info', this.handleSessionInfo.bind(this));
     this.app.command('/stop', this.handleStop.bind(this));
     this.app.command('/help', this.handleHelp.bind(this));
     this.app.command('/chat', this.handleChat.bind(this));
@@ -218,6 +220,7 @@ export class SlackAdapter implements ChatAdapter {
     logger.info(`Processing message from ${chatId}: "${text.substring(0, 50)}..."`);
 
     let session = sessionManager.get(chatId);
+    let isNewSession = false;
 
     if (!session) {
       const restored = sessionManager.restore(chatId);
@@ -230,12 +233,22 @@ export class SlackAdapter implements ChatAdapter {
     if (!session) {
       session = sessionManager.getOrCreate(chatId, userId);
       this.setupSessionOutput(channel, chatId, session);
+      isNewSession = true;
     }
 
     if (!session.isRunning()) {
       try {
         await say('🚀 Starting OpenCode session...');
         await session.start();
+
+        // Inject context for new sessions (not restored)
+        if (isNewSession) {
+          const { injected, messageCount } = await sessionManager.injectContext(session);
+          if (injected) {
+            await say(`💭 Restored conversation context (${messageCount} previous messages)`);
+          }
+        }
+
         await say('✅ OpenCode session ready!');
       } catch (error) {
         logger.error('Failed to start session:', error);
@@ -529,13 +542,90 @@ export class SlackAdapter implements ChatAdapter {
     this.suppressTerminationMessage.add(chatId);
 
     if (await sessionManager.clear(chatId)) {
-      await respond({ text: '🧹 Session cleared.' });
+      await respond({ text: '🧹 Session cleared. Chat history is preserved in the database.' });
     } else {
       await respond({ text: '📊 No active session to clear.' });
     }
 
     // Clean up the flag after a short delay
     setTimeout(() => this.suppressTerminationMessage.delete(chatId), 1000);
+  }
+
+  /**
+   * /forget command - clear session without context injection on next start
+   */
+  private async handleForget({ command, ack, respond }: any): Promise<void> {
+    await ack();
+
+    const channel = command.channel_id;
+    const userId = command.user_id;
+    const chatId = `${channel}-${userId}`;
+
+    // Suppress the 'terminated' event message since we'll send our own
+    this.suppressTerminationMessage.add(chatId);
+
+    if (await sessionManager.clear(chatId)) {
+      await respond({
+        text: '🧠 Session forgotten. Your next message will start fresh without context.\n_Chat history is still saved in the database._',
+      });
+    } else {
+      await respond({ text: '📊 No active session to forget.' });
+    }
+
+    // Clean up the flag after a short delay
+    setTimeout(() => this.suppressTerminationMessage.delete(chatId), 1000);
+  }
+
+  /**
+   * /session-info command - show session info and context stats
+   */
+  private async handleSessionInfo({ command, ack, respond }: any): Promise<void> {
+    await ack();
+
+    const channel = command.channel_id;
+    const userId = command.user_id;
+    const chatId = `${channel}-${userId}`;
+    const session = sessionManager.get(chatId);
+
+    try {
+      // Get context stats from history
+      const contextStats = await sessionManager.getContextStats(chatId);
+
+      let message = '📊 *Session Information*\n\n';
+
+      if (session && session.getStatus() !== 'terminated') {
+        const data = session.toJSON();
+        const status = session.getStatus();
+        const running = session.isRunning() ? '✅ Running' : '❌ Stopped';
+        const sessionAge = Math.floor((Date.now() - data.createdAt.getTime()) / 1000 / 60);
+        const idleTime = Math.floor((Date.now() - data.lastActivity.getTime()) / 1000 / 60);
+
+        message += `*Current Session:*\n`;
+        message += `• Status: ${status}\n`;
+        message += `• Process: ${running}\n`;
+        message += `• Age: ${sessionAge} minutes\n`;
+        message += `• Idle: ${idleTime} minutes\n`;
+        message += `• Project: \`${data.projectPath}\`\n\n`;
+      } else {
+        message += `*Current Session:* None\n\n`;
+      }
+
+      message += `*Conversation Context:*\n`;
+      if (contextStats.messageCount > 0) {
+        message += `• Messages in history: ${contextStats.messageCount}\n`;
+        message += `• Oldest: ${contextStats.oldestMessage?.toLocaleString()}\n`;
+        message += `• Newest: ${contextStats.newestMessage?.toLocaleString()}\n`;
+        message += `\n_If you start a new session, these messages will be injected as context._`;
+      } else {
+        message += `• No previous messages found\n`;
+        message += `\n_This is a fresh conversation with no history._`;
+      }
+
+      await respond({ text: message });
+    } catch (error) {
+      logger.error('Error getting session info:', error);
+      await respond({ text: '❌ Failed to get session information' });
+    }
   }
 
   /**

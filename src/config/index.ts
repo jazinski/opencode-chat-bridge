@@ -44,7 +44,9 @@ export interface Config {
 
   // Sessions
   sessionTimeoutMinutes: number;
+  dmSessionTimeoutMinutes: number; // Longer timeout for DM sessions
   sessionPersistDir: string;
+  contextInjectionMaxTokens: number; // Max tokens to inject as context from history
 
   // Database
   postgresUrl: string | null;
@@ -105,7 +107,9 @@ export const config: Config = {
 
   // Sessions
   sessionTimeoutMinutes: parseInt(process.env.SESSION_TIMEOUT_MINUTES || '30', 10),
+  dmSessionTimeoutMinutes: parseInt(process.env.DM_SESSION_TIMEOUT_MINUTES || '1440', 10), // Default 24 hours for DMs
   sessionPersistDir: expandHome(process.env.SESSION_PERSIST_DIR || './sessions'),
+  contextInjectionMaxTokens: parseInt(process.env.CONTEXT_INJECTION_MAX_TOKENS || '8000', 10), // Default 8K tokens
 
   // Database
   postgresUrl: process.env.POSTGRES_URL || null,

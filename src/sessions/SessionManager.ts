@@ -1,6 +1,7 @@
 import { Session, SessionData } from '@/sessions/Session.js';
 import { logger } from '@/utils/logger.js';
 import config from '@/config';
+import { getChatHistoryDB } from '@/database/ChatHistory.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -57,8 +58,37 @@ export class SessionManager {
   }
 
   /**
+   * Check if a chat ID represents a direct message (DM)
+   * Slack DM channels start with 'D', Telegram DMs are numeric user IDs
+   */
+  private isDM(chatId: string): boolean {
+    // Slack DMs start with 'D' (e.g., D0A65LJSSTU)
+    // Telegram group chats are negative numbers, DMs are positive
+    return chatId.startsWith('D') || (!chatId.startsWith('-') && !isNaN(Number(chatId)));
+  }
+
+  /**
+   * Get platform from chatId
+   */
+  private getPlatform(chatId: string): 'slack' | 'telegram' {
+    // Slack channel IDs start with C, D, or G
+    return chatId.match(/^[CDG]/) ? 'slack' : 'telegram';
+  }
+
+  /**
+   * Extract channel ID from composite chatId (format: channelId-userId or just channelId)
+   */
+  private extractChannelId(chatId: string): string {
+    // For Slack: chatId is "channelId-userId", extract channelId
+    // For Telegram: chatId is just the channel/user ID
+    const parts = chatId.split('-');
+    return parts[0];
+  }
+
+  /**
    * Get or create a session for a chat
    * If no projectPath is provided, defaults to free chat mode
+   * Note: Session is NOT automatically started - caller must start it
    */
   getOrCreate(chatId: string, userId: string, projectPath?: string): Session {
     let session = this.sessions.get(chatId);
@@ -73,11 +103,109 @@ export class SessionManager {
         logger.info(`Created free chat directory: ${config.freeChatDir}`);
       }
       
-      session = new Session(chatId, userId, effectiveProjectPath);
+      // Determine timeout based on whether this is a DM or channel
+      const timeoutMinutes = this.isDM(chatId) 
+        ? config.dmSessionTimeoutMinutes 
+        : config.sessionTimeoutMinutes;
+      
+      session = new Session(chatId, userId, effectiveProjectPath, timeoutMinutes);
       this.sessions.set(chatId, session);
     }
 
     return session;
+  }
+
+  /**
+   * Inject conversation context into a session from chat history
+   * Should be called after session.start() but before first user message
+   */
+  async injectContext(session: Session): Promise<{ injected: boolean; messageCount: number }> {
+    try {
+      const chatId = session.chatId;
+      const platform = this.getPlatform(chatId);
+      const channelId = this.extractChannelId(chatId);
+      const historyDB = getChatHistoryDB();
+      
+      // Get recent messages within token limit
+      const messagesResult = historyDB.getRecentMessagesWithTokenLimit(
+        platform,
+        channelId,
+        config.contextInjectionMaxTokens
+      );
+      
+      // Handle both sync and async results
+      const messages = messagesResult instanceof Promise 
+        ? await messagesResult 
+        : messagesResult;
+      
+      if (messages.length === 0) {
+        return { injected: false, messageCount: 0 };
+      }
+      
+      // Format as context
+      const contextLines = [
+        '--- Previous conversation context ---',
+        '',
+      ];
+      
+      for (const msg of messages) {
+        const userName = msg.user_name || msg.user_id;
+        const timestamp = new Date(msg.timestamp * 1000).toISOString();
+        contextLines.push(`[${timestamp}] ${userName}: ${msg.message_text}`);
+      }
+      
+      contextLines.push('');
+      contextLines.push('--- End of context ---');
+      contextLines.push('');
+      contextLines.push('Please continue the conversation based on the context above.');
+      
+      const contextMessage = contextLines.join('\n');
+      
+      logger.info(`Injecting ${messages.length} messages as context for ${chatId}`);
+      
+      // Send context as a system message (sync to ensure it's processed before user message)
+      await session.sendMessageSync(contextMessage);
+      
+      return { injected: true, messageCount: messages.length };
+    } catch (error) {
+      logger.error(`Failed to inject context for ${session.chatId}:`, error);
+      return { injected: false, messageCount: 0 };
+    }
+  }
+
+  /**
+   * Get context stats for a chat (how many messages would be injected)
+   */
+  async getContextStats(chatId: string): Promise<{ messageCount: number; oldestMessage: Date | null; newestMessage: Date | null }> {
+    try {
+      const platform = this.getPlatform(chatId);
+      const channelId = this.extractChannelId(chatId);
+      const historyDB = getChatHistoryDB();
+      
+      // Get recent messages within token limit
+      const messagesResult = historyDB.getRecentMessagesWithTokenLimit(
+        platform,
+        channelId,
+        config.contextInjectionMaxTokens
+      );
+      
+      // Handle both sync and async results
+      const messages = messagesResult instanceof Promise 
+        ? await messagesResult 
+        : messagesResult;
+      
+      if (messages.length === 0) {
+        return { messageCount: 0, oldestMessage: null, newestMessage: null };
+      }
+      
+      const oldestMessage = new Date(messages[0].timestamp * 1000);
+      const newestMessage = new Date(messages[messages.length - 1].timestamp * 1000);
+      
+      return { messageCount: messages.length, oldestMessage, newestMessage };
+    } catch (error) {
+      logger.error(`Failed to get context stats for ${chatId}:`, error);
+      return { messageCount: 0, oldestMessage: null, newestMessage: null };
+    }
   }
 
   /**

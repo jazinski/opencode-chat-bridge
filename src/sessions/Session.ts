@@ -56,8 +56,9 @@ export class Session extends EventEmitter {
   private accumulatedText: string = '';
   private pendingPermissions: Map<string, Permission> = new Map();
   private isSwitchingProject: boolean = false;
+  private timeoutMinutes: number; // Session-specific timeout
 
-  constructor(chatId: string, userId: string, projectPath: string) {
+  constructor(chatId: string, userId: string, projectPath: string, timeoutMinutes?: number) {
     super();
     this.id = uuidv4();
     this.chatId = chatId;
@@ -65,8 +66,9 @@ export class Session extends EventEmitter {
     this.projectPath = projectPath;
     this.createdAt = new Date();
     this.lastActivity = new Date();
+    this.timeoutMinutes = timeoutMinutes || config.sessionTimeoutMinutes;
 
-    logger.info(`Session created: ${this.id} for user ${userId} at ${projectPath}`);
+    logger.info(`Session created: ${this.id} for user ${userId} at ${projectPath} (timeout: ${this.timeoutMinutes}min)`);
   }
 
   /**
@@ -421,7 +423,7 @@ export class Session extends EventEmitter {
    * Check if session has timed out
    */
   isTimedOut(): boolean {
-    const timeout = config.sessionTimeoutMinutes * 60 * 1000;
+    const timeout = this.timeoutMinutes * 60 * 1000;
     return Date.now() - this.lastActivity.getTime() > timeout;
   }
 
