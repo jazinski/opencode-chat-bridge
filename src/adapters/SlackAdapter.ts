@@ -561,7 +561,17 @@ export class SlackAdapter implements ChatAdapter {
     this.suppressTerminationMessage.add(chatId);
 
     if (await sessionManager.clear(chatId)) {
-      await respond({ text: '🧹 Session cleared. Chat history is preserved in the database.' });
+      // Send visual separator to mark new conversation
+      await this.app.client.chat.postMessage({
+        channel,
+        text:
+          '\n\n\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+          '          🆕 *NEW CONVERSATION*          \n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+          '_Session cleared. Previous messages remain visible above._\n' +
+          '_Chat history is preserved in the database._\n\n\n',
+      });
     } else {
       await respond({ text: '📊 No active session to clear.' });
     }
