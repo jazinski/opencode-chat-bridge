@@ -22,6 +22,18 @@ interface ThinkingState {
   startTime: number;
 }
 
+/** Streaming state for real-time message updates */
+interface StreamingState {
+  channel: string;
+  ts: string;
+  lastUpdateTime: number;
+  accumulatedText: string;
+  updateTimeoutId: NodeJS.Timeout | null;
+  isComplete: boolean;
+  isInitializing: boolean;
+  pendingDeltas: string[];
+}
+
 /** Thinking phrases to cycle through */
 const THINKING_PHRASES = [
   '🤔 Thinking...',
@@ -32,6 +44,12 @@ const THINKING_PHRASES = [
   '📝 Composing response...',
 ];
 
+/** Streaming update interval in milliseconds */
+const STREAM_UPDATE_INTERVAL = 1000; // Update every 1 second
+
+/** Maximum text length before we truncate streaming display */
+const MAX_STREAMING_LENGTH = 2500; // Leave room for truncation message
+
 /**
  * Slack bot adapter for OpenCode
  * Uses Slack Bolt SDK with Socket Mode
@@ -40,6 +58,7 @@ export class SlackAdapter implements ChatAdapter {
   private app: InstanceType<typeof App>;
   private isRunning: boolean = false;
   private thinkingStates: Map<string, ThinkingState> = new Map();
+  private streamingStates: Map<string, StreamingState> = new Map();
   /** Track chats where termination message should be suppressed (user-initiated clear) */
   private suppressTerminationMessage: Set<string> = new Set();
   /** Cache bot user ID for mention detection */
@@ -1647,19 +1666,233 @@ export class SlackAdapter implements ChatAdapter {
   }
 
   /**
+   * Clean up streaming state without finalizing (used on errors/termination)
+   */
+  private async cleanupStreaming(chatId: string): Promise<void> {
+    const state = this.streamingStates.get(chatId);
+    if (!state) return;
+
+    // Clear any pending timeout
+    if (state.updateTimeoutId) {
+      clearTimeout(state.updateTimeoutId);
+    }
+
+    this.streamingStates.delete(chatId);
+  }
+
+  /**
+   * Handle incoming streaming delta from the session
+   */
+  private handleStreamingDelta(chatId: string, delta: string): void {
+    let state = this.streamingStates.get(chatId);
+
+    if (!state) {
+      // First streaming delta - create a placeholder state immediately to prevent race conditions
+      const thinkingState = this.thinkingStates.get(chatId);
+      if (!thinkingState) {
+        logger.warn('No thinking state found for streaming delta');
+        return;
+      }
+
+      state = {
+        channel: thinkingState.channel,
+        ts: thinkingState.ts,
+        lastUpdateTime: Date.now(),
+        accumulatedText: delta,
+        updateTimeoutId: null,
+        isComplete: false,
+        isInitializing: true,
+        pendingDeltas: [],
+      };
+      this.streamingStates.set(chatId, state);
+
+      // Initialize the streaming message (async)
+      this.initializeStreaming(chatId, delta);
+      return;
+    }
+
+    // If still initializing, queue the delta
+    if (state.isInitializing) {
+      state.pendingDeltas.push(delta);
+      return;
+    }
+
+    // Accumulate the text
+    state.accumulatedText += delta;
+
+    // Schedule an update if we're not already waiting for one
+    if (!state.updateTimeoutId) {
+      const timeSinceLastUpdate = Date.now() - state.lastUpdateTime;
+      const delay = Math.max(0, STREAM_UPDATE_INTERVAL - timeSinceLastUpdate);
+
+      state.updateTimeoutId = setTimeout(() => {
+        this.flushStreamingUpdate(chatId);
+      }, delay);
+    }
+  }
+
+  /**
+   * Initialize streaming by converting the thinking message to a streaming message
+   */
+  private async initializeStreaming(chatId: string, initialText: string): Promise<void> {
+    const thinkingState = this.thinkingStates.get(chatId);
+    if (!thinkingState) {
+      logger.warn('No thinking state found for streaming initialization');
+      this.streamingStates.delete(chatId);
+      return;
+    }
+
+    try {
+      // Stop the thinking indicator
+      clearInterval(thinkingState.intervalId);
+      this.thinkingStates.delete(chatId);
+
+      // Edit the thinking message to show initial streaming text
+      await this.app.client.chat.update({
+        channel: thinkingState.channel,
+        ts: thinkingState.ts,
+        text: initialText,
+      });
+
+      // Update the streaming state
+      const state = this.streamingStates.get(chatId);
+      if (state) {
+        state.isInitializing = false;
+
+        // Add any pending deltas that arrived during initialization
+        if (state.pendingDeltas.length > 0) {
+          state.accumulatedText += state.pendingDeltas.join('');
+          state.pendingDeltas = [];
+
+          // Schedule an update to show the accumulated text
+          if (!state.updateTimeoutId) {
+            state.updateTimeoutId = setTimeout(() => {
+              this.flushStreamingUpdate(chatId);
+            }, STREAM_UPDATE_INTERVAL);
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to initialize streaming:', error);
+      this.streamingStates.delete(chatId);
+    }
+  }
+
+  /**
+   * Flush accumulated streaming text to Slack
+   */
+  private async flushStreamingUpdate(chatId: string): Promise<void> {
+    const state = this.streamingStates.get(chatId);
+    if (!state || state.isComplete) return;
+
+    state.updateTimeoutId = null;
+    state.lastUpdateTime = Date.now();
+
+    try {
+      // Truncate if too long for display
+      let displayText = state.accumulatedText;
+      if (displayText.length > MAX_STREAMING_LENGTH) {
+        displayText =
+          displayText.substring(0, MAX_STREAMING_LENGTH) +
+          '...\n\n_(streaming, will show full response when complete)_';
+      }
+
+      await this.app.client.chat.update({
+        channel: state.channel,
+        ts: state.ts,
+        text: displayText,
+      });
+    } catch (error) {
+      logger.debug('Failed to update streaming message:', error);
+    }
+  }
+
+  /**
+   * Finalize streaming when the response is complete
+   */
+  private async finalizeStreaming(chatId: string, finalText: string): Promise<void> {
+    const state = this.streamingStates.get(chatId);
+
+    // Clear any pending update timeout
+    if (state?.updateTimeoutId) {
+      clearTimeout(state.updateTimeoutId);
+    }
+
+    // Clean up streaming state
+    this.streamingStates.delete(chatId);
+
+    if (state) {
+      // Edit the streaming message with final text
+      try {
+        // Check if we need to chunk the message
+        if (finalText.length <= 3000) {
+          // Update the existing message
+          await this.app.client.chat.update({
+            channel: state.channel,
+            ts: state.ts,
+            text: finalText,
+          });
+          return; // Successfully handled via streaming message
+        } else {
+          // Delete the streaming message and send chunked response
+          try {
+            await this.app.client.chat.delete({
+              channel: state.channel,
+              ts: state.ts,
+            });
+          } catch (error) {
+            logger.debug('Failed to delete streaming message:', error);
+          }
+
+          // Send chunked messages
+          const chunks = chunkMessage(finalText, 3000);
+          for (const chunk of chunks) {
+            await this.app.client.chat.postMessage({
+              channel: state.channel,
+              text: chunk,
+            });
+          }
+        }
+        return;
+      } catch (error) {
+        logger.debug('Failed to finalize streaming message, will send new message:', error);
+      }
+    }
+
+    // No streaming state or edit failed - send as new message(s)
+    if (state) {
+      const chunks = chunkMessage(finalText, 3000);
+      for (const chunk of chunks) {
+        await this.app.client.chat.postMessage({
+          channel: state.channel,
+          text: chunk,
+        });
+      }
+    }
+  }
+
+  /**
    * Set up output handler for a session
    */
   private setupSessionOutput(channel: string, chatId: string, session: Session | undefined): void {
     if (!session) return;
 
-    // Handle regular output
+    // Handle streaming text - update message periodically as text arrives
+    session.on('streaming', (delta: string) => {
+      this.handleStreamingDelta(chatId, delta);
+    });
+
+    // Handle regular output (final response or structured output)
     session.onOutput(async (data: string) => {
-      // Stop thinking indicator when we get output
+      // Clean up thinking indicator
       await this.stopThinking(chatId);
 
       try {
         // Check if this looks like a permission request
         if (data.includes('*Permission Required*')) {
+          // Clean up streaming state first
+          await this.cleanupStreaming(chatId);
+
           await this.app.client.chat.postMessage({
             channel,
             text: data,
@@ -1698,13 +1931,8 @@ export class SlackAdapter implements ChatAdapter {
           return;
         }
 
-        const chunks = chunkMessage(data, 3000);
-        for (const chunk of chunks) {
-          await this.app.client.chat.postMessage({
-            channel,
-            text: chunk,
-          });
-        }
+        // Use streaming finalization to update the existing message or send new one
+        await this.finalizeStreaming(chatId, data);
       } catch (error) {
         logger.error('Failed to send output to Slack:', error);
       }
@@ -1758,6 +1986,9 @@ export class SlackAdapter implements ChatAdapter {
       // Stop thinking indicator on error
       await this.stopThinking(chatId);
 
+      // Clean up streaming state
+      await this.cleanupStreaming(chatId);
+
       try {
         await this.app.client.chat.postMessage({
           channel,
@@ -1772,6 +2003,9 @@ export class SlackAdapter implements ChatAdapter {
     session.on('terminated', async () => {
       // Stop thinking indicator on termination
       await this.stopThinking(chatId);
+
+      // Clean up streaming state
+      await this.cleanupStreaming(chatId);
 
       // Only send termination message if not user-initiated (e.g., /clear)
       if (this.suppressTerminationMessage.has(chatId)) {
