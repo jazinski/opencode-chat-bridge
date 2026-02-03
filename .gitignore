@@ -32,4 +32,7 @@ coverage/
 
 # Misc
 *.tgz
-.npmAZURE_WEBHOOK_CREDENTIALS.md
+.npm
+
+# Azure webhook credentials (contains secrets)
+AZURE_WEBHOOK_CREDENTIALS.md
