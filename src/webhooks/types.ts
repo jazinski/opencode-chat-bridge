@@ -38,9 +38,9 @@ export interface WorkItemResource {
     'System.State': string;
     'System.Reason': string;
     'System.CreatedDate': string;
-    'System.CreatedBy': AzureDevOpsIdentity;
+    'System.CreatedBy': AzureDevOpsIdentity | string;
     'System.ChangedDate': string;
-    'System.ChangedBy': AzureDevOpsIdentity;
+    'System.ChangedBy': AzureDevOpsIdentity | string;
     'System.Title': string;
     'System.BoardColumn'?: string;
     'System.BoardColumnDone'?: boolean;
@@ -116,7 +116,7 @@ export interface MentionContext {
   workItemTitle: string;
   workItemUrl: string;
   projectName: string;
-  mentionedBy: AzureDevOpsIdentity;
+  mentionedBy: AzureDevOpsIdentity | string;
   mentionText: string; // Full text of the comment/field containing the mention
   intent?: string; // Extracted intent (e.g., "research X", "review PR", "analyze Y")
   timestamp: Date;

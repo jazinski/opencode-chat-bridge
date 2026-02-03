@@ -110,6 +110,22 @@ router.post('/azure-devops', validateWebhook, async (req: Request, res: Response
  * Process webhook payload asynchronously
  */
 async function processWebhook(payload: AzureDevOpsWebhookPayload): Promise<void> {
+  // Log payload for debugging
+  logger.debug('Processing webhook payload');
+
+  // Save full payload to file for inspection (temporary for debugging)
+  try {
+    const fs = await import('fs/promises');
+    await fs.writeFile(
+      '/tmp/azure-webhook-payload.json',
+      JSON.stringify(payload, null, 2),
+      'utf-8'
+    );
+    logger.debug('Saved webhook payload to /tmp/azure-webhook-payload.json');
+  } catch (err) {
+    logger.warn('Failed to save webhook payload', err);
+  }
+
   // Check if this webhook contains a bot mention
   if (!AzureDevOpsHandler.hasBotMention(payload)) {
     logger.debug('No bot mention found, ignoring webhook');
@@ -126,7 +142,10 @@ async function processWebhook(payload: AzureDevOpsWebhookPayload): Promise<void>
   logger.info(`Bot mentioned in work item ${mentionContext.workItemId}`, {
     workItemId: mentionContext.workItemId,
     intent: mentionContext.intent,
-    mentionedBy: mentionContext.mentionedBy.displayName,
+    mentionedBy:
+      typeof mentionContext.mentionedBy === 'string'
+        ? mentionContext.mentionedBy
+        : mentionContext.mentionedBy.displayName,
   });
 
   // If no intent provided, respond with help message
@@ -164,7 +183,10 @@ async function processWebhook(payload: AzureDevOpsWebhookPayload): Promise<void>
       workItemType: mentionContext.workItemType,
       workItemUrl: mentionContext.workItemUrl,
       projectName: mentionContext.projectName,
-      mentionedBy: mentionContext.mentionedBy.displayName,
+      mentionedBy:
+        typeof mentionContext.mentionedBy === 'string'
+          ? mentionContext.mentionedBy
+          : mentionContext.mentionedBy.displayName,
       intent: mentionContext.intent,
       eventType: payload.eventType,
     },

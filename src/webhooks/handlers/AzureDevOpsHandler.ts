@@ -18,13 +18,22 @@ export class AzureDevOpsHandler {
   static hasBotMention(payload: AzureDevOpsWebhookPayload): boolean {
     const botName = config.azureDevOpsBotName.toLowerCase();
 
+    logger.debug('Checking for bot mention', {
+      botName,
+      messageText: payload.message?.text,
+      detailedMessageText: payload.detailedMessage?.text,
+      eventType: payload.eventType,
+    });
+
     // Check in message text
     if (payload.message?.text?.toLowerCase().includes(botName)) {
+      logger.debug('Found bot mention in message.text');
       return true;
     }
 
     // Check in detailed message
     if (payload.detailedMessage?.text?.toLowerCase().includes(botName)) {
+      logger.debug('Found bot mention in detailedMessage.text');
       return true;
     }
 
@@ -32,7 +41,17 @@ export class AzureDevOpsHandler {
     if (this.isWorkItemEvent(payload.eventType as AzureDevOpsEventType)) {
       const resource = payload.resource as WorkItemResource;
       const history = resource.fields?.['System.History'];
+
+      logger.debug('Checking work item history', {
+        hasHistory: !!history,
+        historyType: typeof history,
+        historyPreview: history ? String(history).substring(0, 200) : null,
+        hasRevision: !!resource.revision,
+        revisionHistoryPreview: resource.revision?.fields?.['System.History']?.substring(0, 200),
+      });
+
       if (history && typeof history === 'string' && history.toLowerCase().includes(botName)) {
+        logger.debug('Found bot mention in System.History');
         return true;
       }
 
@@ -40,11 +59,13 @@ export class AzureDevOpsHandler {
       if (resource.revision?.fields?.['System.History']) {
         const revHistory = resource.revision.fields['System.History'];
         if (typeof revHistory === 'string' && revHistory.toLowerCase().includes(botName)) {
+          logger.debug('Found bot mention in revision.fields.System.History');
           return true;
         }
       }
     }
 
+    logger.debug('No bot mention found in any field');
     return false;
   }
 
@@ -83,6 +104,10 @@ export class AzureDevOpsHandler {
     // Extract intent (text after the @mention)
     const intent = this.extractIntent(mentionText, botName);
 
+    // Parse mentionedBy - Azure DevOps can send either a string or an object
+    const changedBy = resource.fields['System.ChangedBy'];
+    const mentionedByName = this.parseIdentityDisplayName(changedBy);
+
     const context: MentionContext = {
       botName,
       workItemId: resource.id,
@@ -90,17 +115,43 @@ export class AzureDevOpsHandler {
       workItemTitle: resource.fields['System.Title'],
       workItemUrl: resource._links.html.href,
       projectName: resource.fields['System.TeamProject'],
-      mentionedBy: resource.fields['System.ChangedBy'],
+      mentionedBy: changedBy,
       mentionText,
       intent,
       timestamp: new Date(payload.createdDate),
     };
 
     logger.info(
-      `Parsed mention context: WorkItem=${context.workItemId}, Intent="${context.intent}", By=${context.mentionedBy.displayName}`
+      `Parsed mention context: WorkItem=${context.workItemId}, Intent="${context.intent}", By=${mentionedByName}`
     );
 
     return context;
+  }
+
+  /**
+   * Parse display name from Azure DevOps identity (handles both string and object formats)
+   */
+  private static parseIdentityDisplayName(identity: any): string {
+    if (!identity) {
+      return 'Unknown';
+    }
+
+    // If it's an object with displayName
+    if (typeof identity === 'object' && identity.displayName) {
+      return identity.displayName;
+    }
+
+    // If it's a string like "****Christopher Jazinski <p-mug472@utrgv.edu>"
+    if (typeof identity === 'string') {
+      // Extract name before < character (email part)
+      const match = identity.match(/^(.+?)\s*<.*>$/);
+      if (match && match[1]) {
+        return match[1].replace(/^\*+/, '').trim(); // Remove leading asterisks
+      }
+      return identity.replace(/^\*+/, '').trim(); // Fallback: just remove asterisks
+    }
+
+    return String(identity);
   }
 
   /**
