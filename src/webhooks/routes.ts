@@ -237,7 +237,32 @@ Try mentioning me with one of these commands.`;
       '👀 Got it! Starting workflow...'
     );
 
-    // 2. Update work item status to indicate work has started
+    // 2. Assign work item to the user who mentioned the bot
+    if (mentionContext.mentionedByEmail) {
+      logger.info(
+        `Assigning work item ${mentionContext.workItemId} to ${mentionContext.mentionedByEmail}`
+      );
+
+      const assignResult = await azureDevOpsClient.updateWorkItem(
+        mentionContext.projectName,
+        mentionContext.workItemId,
+        [
+          {
+            op: 'add',
+            path: '/fields/System.AssignedTo',
+            value: mentionContext.mentionedByEmail,
+          },
+        ]
+      );
+
+      if (assignResult.success) {
+        logger.info(`Successfully assigned work item to ${mentionContext.mentionedByEmail}`);
+      } else {
+        logger.warn(`Failed to assign work item: ${assignResult.error}`);
+      }
+    }
+
+    // 3. Update work item status to indicate work has started
     const statusUpdate = await azureDevOpsClient.updateWorkItem(
       mentionContext.projectName,
       mentionContext.workItemId,
@@ -254,7 +279,7 @@ Try mentioning me with one of these commands.`;
       logger.info(`Added 'AI-Processing' tag to work item ${mentionContext.workItemId}`);
     }
 
-    // 3. Post detailed workflow start message
+    // 4. Post detailed workflow start message
     const startMessage = `🚀 **Workflow Started: ${workflow.name}**
 
 Executing ${workflow.tasks.length} specialized agents to ${workflow.strategy === 'parallel' ? 'simultaneously analyze' : 'systematically investigate'} your request.
@@ -269,7 +294,7 @@ ${workflow.strategy === 'sequential' ? "📊 I'll post updates as each agent com
       startMessage
     );
 
-    // 4. Set up progress tracking for sequential workflows
+    // 5. Set up progress tracking for sequential workflows
     let completedAgents = 0;
     const totalAgents = workflow.tasks.length;
 
@@ -301,7 +326,7 @@ ${workflow.strategy === 'sequential' ? "📊 I'll post updates as each agent com
       taskCount: execution.results.length,
     });
 
-    // 5. Remove AI-Processing tag and add completion tag
+    // 6. Remove AI-Processing tag and add completion tag
     await azureDevOpsClient.updateWorkItem(mentionContext.projectName, mentionContext.workItemId, [
       {
         op: 'remove',
@@ -318,7 +343,13 @@ ${workflow.strategy === 'sequential' ? "📊 I'll post updates as each agent com
     // Format and post final results to work item
     if (execution.status === 'completed' && execution.finalOutput) {
       const durationMinutes = Math.round((execution.duration || 0) / 1000 / 60);
-      const resultMessage = `✅ **Workflow Complete: ${workflow.name}**
+
+      // Build mention prefix if we have the user's email
+      const mentionPrefix = mentionContext.mentionedByEmail
+        ? `@<${mentionContext.mentionedByEmail}> `
+        : '';
+
+      const resultMessage = `${mentionPrefix}✅ **Workflow Complete: ${workflow.name}**
 
 ⏱️ Duration: ${durationMinutes} minute${durationMinutes !== 1 ? 's' : ''}
 🤖 Agents: ${execution.results.length}
@@ -339,7 +370,12 @@ ${execution.finalOutput}
 
       logger.info(`Posted workflow results to work item ${mentionContext.workItemId}`);
     } else if (execution.status === 'failed') {
-      const errorMessage = `❌ **Workflow Failed: ${workflow.name}**
+      // Build mention prefix if we have the user's email
+      const mentionPrefix = mentionContext.mentionedByEmail
+        ? `@<${mentionContext.mentionedByEmail}> `
+        : '';
+
+      const errorMessage = `${mentionPrefix}❌ **Workflow Failed: ${workflow.name}**
 
 The workflow encountered an error during execution.
 

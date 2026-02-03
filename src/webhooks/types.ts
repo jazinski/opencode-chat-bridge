@@ -117,6 +117,8 @@ export interface MentionContext {
   workItemUrl: string;
   projectName: string;
   mentionedBy: AzureDevOpsIdentity | string;
+  mentionedByEmail?: string; // Email address of the user who mentioned the bot
+  mentionedByDisplayName?: string; // Display name of the user who mentioned the bot
   mentionText: string; // Full text of the comment/field containing the mention
   intent?: string; // Extracted intent (e.g., "research X", "review PR", "analyze Y")
   timestamp: Date;

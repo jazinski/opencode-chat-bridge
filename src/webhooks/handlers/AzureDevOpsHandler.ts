@@ -107,6 +107,7 @@ export class AzureDevOpsHandler {
     // Parse mentionedBy - Azure DevOps can send either a string or an object
     const changedBy = resource.fields['System.ChangedBy'];
     const mentionedByName = this.parseIdentityDisplayName(changedBy);
+    const mentionedByEmail = this.parseIdentityEmail(changedBy);
 
     const context: MentionContext = {
       botName,
@@ -116,6 +117,8 @@ export class AzureDevOpsHandler {
       workItemUrl: resource._links.html.href,
       projectName: resource.fields['System.TeamProject'],
       mentionedBy: changedBy,
+      mentionedByEmail,
+      mentionedByDisplayName: mentionedByName,
       mentionText,
       intent,
       timestamp: new Date(payload.createdDate),
@@ -152,6 +155,31 @@ export class AzureDevOpsHandler {
     }
 
     return String(identity);
+  }
+
+  /**
+   * Parse email address from Azure DevOps identity (handles both string and object formats)
+   */
+  private static parseIdentityEmail(identity: any): string | undefined {
+    if (!identity) {
+      return undefined;
+    }
+
+    // If it's an object with uniqueName (email)
+    if (typeof identity === 'object' && identity.uniqueName) {
+      return identity.uniqueName;
+    }
+
+    // If it's a string like "****Christopher Jazinski <p-mug472@utrgv.edu>"
+    if (typeof identity === 'string') {
+      // Extract email within < > brackets
+      const match = identity.match(/<([^>]+)>/);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+
+    return undefined;
   }
 
   /**
