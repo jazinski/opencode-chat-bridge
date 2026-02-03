@@ -59,6 +59,10 @@ export interface Config {
   azureDevOpsBotName: string;
   azureDevOpsAllowedIps: string[];
 
+  // Azure DevOps API
+  azureDevOpsOrganization: string;
+  azureDevOpsPersonalAccessToken: string;
+
   // Workflows
   workflowTimeoutMinutes: number;
   workflowMaxAgents: number;
@@ -130,6 +134,10 @@ export const config: Config = {
   azureDevOpsWebhookSecret: process.env.AZURE_DEVOPS_WEBHOOK_SECRET || '',
   azureDevOpsBotName: process.env.AZURE_DEVOPS_BOT_NAME || '@OpenCodeBot',
   azureDevOpsAllowedIps: parseAllowedChannels(process.env.AZURE_DEVOPS_ALLOWED_IPS),
+
+  // Azure DevOps API
+  azureDevOpsOrganization: process.env.AZURE_DEVOPS_ORGANIZATION || '',
+  azureDevOpsPersonalAccessToken: process.env.AZURE_DEVOPS_PAT || '',
 
   // Workflows
   workflowTimeoutMinutes: parseInt(process.env.WORKFLOW_TIMEOUT_MINUTES || '30', 10),

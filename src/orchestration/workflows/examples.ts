@@ -9,7 +9,8 @@ export function initializeWorkflows(): void {
   workflowEngine.registerWorkflow(researchWorkflow);
   workflowEngine.registerWorkflow(codeReviewWorkflow);
   workflowEngine.registerWorkflow(bugInvestigationWorkflow);
-  logger.info('Registered 3 example workflows');
+  workflowEngine.registerWorkflow(accessibilityScanWorkflow);
+  logger.info('Registered 4 example workflows');
 }
 
 /**
@@ -271,10 +272,135 @@ Be specific and actionable.`,
 };
 
 /**
+ * Accessibility scan workflow for WCAG compliance
+ */
+export const accessibilityScanWorkflow: WorkflowDefinition = {
+  id: 'accessibility-scan-workflow',
+  name: 'Accessibility Compliance Scan',
+  description: 'Multi-agent accessibility audit with WCAG 2.1 AA compliance',
+  strategy: 'sequential' as ExecutionStrategy,
+  timeout: 25,
+  tasks: [
+    {
+      id: 'wcag-compliance',
+      name: 'WCAG Compliance Agent',
+      prompt: `You are a WCAG 2.1 AA compliance specialist. Analyze the application for accessibility compliance.
+
+Application: {{APP_URL}}
+Work Item: {{WORK_ITEM_URL}}
+
+Tasks:
+1. Check WCAG 2.1 Level AA compliance
+2. Identify violations by category:
+   - Perceivable (text alternatives, captions, adaptable, distinguishable)
+   - Operable (keyboard accessible, enough time, seizures, navigable)
+   - Understandable (readable, predictable, input assistance)
+   - Robust (compatible with assistive technologies)
+3. Document each violation with:
+   - Severity (Critical, Major, Minor)
+   - WCAG success criterion violated
+   - Location in the application
+   - Impact on users with disabilities
+4. Prioritize issues by user impact
+
+Use web search to verify current WCAG 2.1 standards. If {{APP_URL}} is provided, analyze it directly.`,
+      timeout: 10,
+    },
+    {
+      id: 'automated-testing',
+      name: 'Automated Testing Agent',
+      prompt: `You are an automated accessibility testing specialist. Recommend and evaluate automated testing strategies.
+
+Application: {{APP_URL}}
+Work Item: {{WORK_ITEM_URL}}
+
+Tasks:
+1. Recommend automated testing tools:
+   - axe-core (deque)
+   - WAVE (WebAIM)
+   - Lighthouse
+   - Pa11y
+   - NVDA/JAWS screen reader testing
+2. Create test plan with specific test cases
+3. Identify areas that require manual testing
+4. Suggest CI/CD integration approaches
+5. Provide code examples for automated tests
+
+Use web search for latest tools and best practices.`,
+      timeout: 8,
+    },
+    {
+      id: 'remediation-plan',
+      name: 'Remediation Planning Agent',
+      prompt: `You are an accessibility remediation expert. Create a detailed remediation plan.
+
+Application: {{APP_URL}}
+Work Item: {{WORK_ITEM_URL}}
+
+Tasks:
+1. Prioritize issues by:
+   - Legal compliance risk (Critical: P0)
+   - User impact severity (High: P1, Medium: P2, Low: P3)
+   - Remediation complexity
+2. For each priority group, provide:
+   - Specific implementation guidance
+   - Code examples (HTML, CSS, ARIA, JavaScript)
+   - Alternative approaches
+   - Testing strategies
+3. Estimate effort for each fix (hours/days)
+4. Create phased rollout plan
+5. Recommend ongoing compliance monitoring
+
+Provide actionable, specific guidance that developers can implement immediately.`,
+      timeout: 7,
+    },
+  ],
+  synthesisPrompt: `Create a comprehensive accessibility audit report:
+
+# Executive Summary
+[High-level overview with total violation count by severity]
+
+# WCAG Compliance Status
+[Compliance percentage and key findings]
+
+# Critical Issues (P0)
+[Must-fix violations with legal implications]
+
+# High Priority Issues (P1)
+[Significant user impact violations]
+
+# Medium/Low Priority Issues (P2-P3)
+[Lesser violations and improvements]
+
+# Automated Testing Strategy
+[Tools, setup, and CI/CD integration]
+
+# Remediation Roadmap
+[Phased implementation plan with timelines]
+
+# Code Examples
+[Key remediation code samples]
+
+# Ongoing Compliance
+[Long-term monitoring and maintenance strategy]`,
+};
+
+/**
  * Get workflow by ID or intent
  */
 export function getWorkflowForIntent(intent: string): WorkflowDefinition | null {
   const intentLower = intent.toLowerCase();
+
+  // Accessibility scan workflow
+  if (
+    intentLower.includes('accessibility') ||
+    intentLower.includes('a11y') ||
+    intentLower.includes('wcag') ||
+    intentLower.includes('508') ||
+    intentLower.includes('accessible')
+  ) {
+    return accessibilityScanWorkflow;
+  }
 
   if (intentLower.includes('research') || intentLower.includes('investigate')) {
     return researchWorkflow;

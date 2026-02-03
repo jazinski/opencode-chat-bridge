@@ -31,6 +31,7 @@
     "@slack/bolt": "^3.22.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/pg": "^8.16.0",
+    "axios": "^1.13.4",
     "better-sqlite3": "^12.6.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

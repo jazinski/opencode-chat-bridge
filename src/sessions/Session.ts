@@ -223,9 +223,23 @@ export class Session extends EventEmitter {
       if (sessionID && sessionID !== this.opencodeSessionId) return;
 
       logger.error(`Session error:`, error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.sendOutput(` Error: ${errorMessage}`);
-      this.emit('error', error instanceof Error ? error : new Error(String(error)));
+      
+      // Properly extract error message from various error formats
+      let errorMessage: string;
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        // Handle error objects from SSE events (e.g., { message: '...', code: '...', ... })
+        const errObj = error as Record<string, unknown>;
+        errorMessage = errObj.message 
+          ? String(errObj.message) 
+          : (errObj.error ? String(errObj.error) : JSON.stringify(error));
+      } else {
+        errorMessage = String(error);
+      }
+      
+      this.sendOutput(`❌ Error: ${errorMessage}`);
+      this.emit('error', new Error(errorMessage));
     });
 
     // Handle client errors
