@@ -138,6 +138,7 @@ export class WorkflowEngine extends EventEmitter {
 
         this.emitEvent(executionId, 'task.completed', {
           taskId: task.id,
+          taskName: task.name,
           duration: result.duration,
         });
 
@@ -180,6 +181,7 @@ export class WorkflowEngine extends EventEmitter {
         const result = await this.agentPool.executeTask(task, executionId);
         this.emitEvent(executionId, 'task.completed', {
           taskId: task.id,
+          taskName: task.name,
           duration: result.duration,
         });
         return result;

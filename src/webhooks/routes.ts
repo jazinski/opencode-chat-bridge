@@ -230,14 +230,38 @@ Try mentioning me with one of these commands.`;
   try {
     logger.info(`Starting workflow execution for work item ${mentionContext.workItemId}`);
 
-    // Post initial comment indicating workflow started
+    // 1. Post immediate acknowledgment with eyes emoji
+    await azureDevOpsClient.addWorkItemComment(
+      mentionContext.projectName,
+      mentionContext.workItemId,
+      '👀 Got it! Starting workflow...'
+    );
+
+    // 2. Update work item status to indicate work has started
+    const statusUpdate = await azureDevOpsClient.updateWorkItem(
+      mentionContext.projectName,
+      mentionContext.workItemId,
+      [
+        {
+          op: 'add',
+          path: '/fields/System.Tags',
+          value: 'AI-Processing',
+        },
+      ]
+    );
+
+    if (statusUpdate.success) {
+      logger.info(`Added 'AI-Processing' tag to work item ${mentionContext.workItemId}`);
+    }
+
+    // 3. Post detailed workflow start message
     const startMessage = `🚀 **Workflow Started: ${workflow.name}**
 
 Executing ${workflow.tasks.length} specialized agents to ${workflow.strategy === 'parallel' ? 'simultaneously analyze' : 'systematically investigate'} your request.
 
 ⏱️ Estimated completion: ${workflow.timeout || 15} minutes
 
-I'll post the results here when complete.`;
+${workflow.strategy === 'sequential' ? "📊 I'll post updates as each agent completes." : "🔄 All agents running in parallel - I'll post results when complete."}`;
 
     await azureDevOpsClient.addWorkItemComment(
       mentionContext.projectName,
@@ -245,13 +269,51 @@ I'll post the results here when complete.`;
       startMessage
     );
 
+    // 4. Set up progress tracking for sequential workflows
+    let completedAgents = 0;
+    const totalAgents = workflow.tasks.length;
+
+    // Listen for task completion events
+    const taskCompletedListener = async (event: any) => {
+      if (workflow.strategy === 'sequential') {
+        completedAgents++;
+        const progressMessage = `✅ Agent ${completedAgents}/${totalAgents} completed: **${event.taskName || 'Agent'}**\n\n${completedAgents < totalAgents ? `⏳ Starting agent ${completedAgents + 1}/${totalAgents}...` : '🎯 All agents complete! Synthesizing results...'}`;
+
+        await azureDevOpsClient.addWorkItemComment(
+          mentionContext.projectName,
+          mentionContext.workItemId,
+          progressMessage
+        );
+      }
+    };
+
+    // Register listener before execution starts
+    workflowEngine.on('task.completed', taskCompletedListener);
+
     const execution = await workflowEngine.executeWorkflow(customized.id, trigger);
+
+    // Clean up listener
+    workflowEngine.removeListener('task.completed', taskCompletedListener);
 
     logger.info(`Workflow execution completed: ${execution.id}`, {
       status: execution.status,
       duration: execution.duration,
       taskCount: execution.results.length,
     });
+
+    // 5. Remove AI-Processing tag and add completion tag
+    await azureDevOpsClient.updateWorkItem(mentionContext.projectName, mentionContext.workItemId, [
+      {
+        op: 'remove',
+        path: '/fields/System.Tags',
+        value: 'AI-Processing',
+      },
+      {
+        op: 'add',
+        path: '/fields/System.Tags',
+        value: execution.status === 'completed' ? 'AI-Complete' : 'AI-Failed',
+      },
+    ]);
 
     // Format and post final results to work item
     if (execution.status === 'completed' && execution.finalOutput) {
