@@ -27,7 +27,7 @@
   "author": "cjazinski",
   "license": "MIT",
   "dependencies": {
-    "@opencode-ai/sdk": "^1.0.203",
+    "@opencode-ai/sdk": "^1.1.49",
     "@slack/bolt": "^3.22.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/pg": "^8.16.0",
