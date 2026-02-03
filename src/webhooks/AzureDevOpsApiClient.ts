@@ -80,7 +80,35 @@ export class AzureDevOpsApiClient {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error adding comment';
-      logger.error(`Failed to add comment to work item ${workItemId}:`, error);
+
+      // Enhanced error logging with full details
+      if (axios.isAxiosError(error)) {
+        const errorDetails = {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          baseURL: error.config?.baseURL,
+          fullURL: `${error.config?.baseURL}${error.config?.url}`,
+          method: error.config?.method,
+          data: error.response?.data,
+        };
+
+        logger.error(
+          `Failed to add comment to work item ${workItemId}: ${JSON.stringify(errorDetails, null, 2)}`
+        );
+
+        // Write to file for debugging
+        import('fs/promises').then((fs) => {
+          fs.writeFile(
+            '/tmp/azure-api-error.json',
+            JSON.stringify(errorDetails, null, 2),
+            'utf-8'
+          ).catch(() => {});
+        });
+      } else {
+        logger.error(`Failed to add comment to work item ${workItemId}:`, error);
+      }
 
       return {
         success: false,
