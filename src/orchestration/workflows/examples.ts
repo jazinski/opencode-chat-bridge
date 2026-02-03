@@ -1,16 +1,24 @@
 import type { WorkflowDefinition, ExecutionStrategy } from '../types.js';
 import { workflowEngine } from '../WorkflowEngine.js';
 import { logger } from '@/utils/logger.js';
+import { gitPrWorkflow } from './git-pr-workflow.js';
+import { bugFixWorkflow } from './bug-fix-workflow.js';
 
 /**
  * Initialize and register all example workflows
  */
 export function initializeWorkflows(): void {
+  // Research and analysis workflows (no code changes)
   workflowEngine.registerWorkflow(researchWorkflow);
   workflowEngine.registerWorkflow(codeReviewWorkflow);
   workflowEngine.registerWorkflow(bugInvestigationWorkflow);
   workflowEngine.registerWorkflow(accessibilityScanWorkflow);
-  logger.info('Registered 4 example workflows');
+
+  // Implementation workflows (with git PR)
+  workflowEngine.registerWorkflow(gitPrWorkflow);
+  workflowEngine.registerWorkflow(bugFixWorkflow);
+
+  logger.info('Registered 6 workflows (4 analysis, 2 implementation with git PR)');
 }
 
 /**
@@ -388,7 +396,10 @@ Provide actionable, specific guidance that developers can implement immediately.
 /**
  * Get workflow by ID or intent
  */
-export function getWorkflowForIntent(intent: string): WorkflowDefinition | null {
+export function getWorkflowForIntent(
+  intent: string,
+  needsImplementation: boolean = false
+): WorkflowDefinition | null {
   const intentLower = intent.toLowerCase();
 
   // Accessibility scan workflow
@@ -402,16 +413,29 @@ export function getWorkflowForIntent(intent: string): WorkflowDefinition | null 
     return accessibilityScanWorkflow;
   }
 
+  // Bug workflows - use bug fix if implementation needed
+  if (intentLower.includes('bug') || intentLower.includes('issue') || intentLower.includes('fix')) {
+    return needsImplementation ? bugFixWorkflow : bugInvestigationWorkflow;
+  }
+
+  // Implementation/feature workflows
+  if (
+    needsImplementation ||
+    intentLower.includes('implement') ||
+    intentLower.includes('add') ||
+    intentLower.includes('create') ||
+    intentLower.includes('feature')
+  ) {
+    return gitPrWorkflow;
+  }
+
+  // Research workflows (no code changes)
   if (intentLower.includes('research') || intentLower.includes('investigate')) {
     return researchWorkflow;
   }
 
   if (intentLower.includes('review') || intentLower.includes('code review')) {
     return codeReviewWorkflow;
-  }
-
-  if (intentLower.includes('bug') || intentLower.includes('issue') || intentLower.includes('fix')) {
-    return bugInvestigationWorkflow;
   }
 
   return null;
