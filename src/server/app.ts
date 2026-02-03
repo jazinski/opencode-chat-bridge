@@ -1,7 +1,9 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import apiRoutes from '@/server/routes/api.js';
+import webhookRoutes from '@/webhooks/routes.js';
 import { logger } from '@/utils/logger.js';
 import config from '@/config';
+import { initializeWorkflows } from '@/orchestration/workflows/examples.js';
 
 /**
  * Create and configure the Express application
@@ -22,6 +24,9 @@ export function createApp(): Express {
   // API routes
   app.use('/api', apiRoutes);
 
+  // Webhook routes
+  app.use('/webhooks', webhookRoutes);
+
   // Root endpoint
   app.get('/', (_req: Request, res: Response) => {
     res.json({
@@ -35,6 +40,10 @@ export function createApp(): Express {
         clearSession: 'DELETE /api/sessions/:chatId',
         sendMessage: 'POST /api/sessions/:chatId/message',
         interrupt: 'POST /api/sessions/:chatId/interrupt',
+        webhooks: {
+          azureDevOps: 'POST /webhooks/azure-devops',
+          webhooksHealth: 'GET /webhooks/health',
+        },
       },
     });
   });
@@ -57,7 +66,11 @@ export function createApp(): Express {
  * Start the Express server
  */
 export function startServer(app: Express): void {
+  // Initialize workflows before starting server
+  initializeWorkflows();
+
   app.listen(config.port, () => {
     logger.info(`Server listening on port ${config.port}`);
+    logger.info(`Webhook endpoint: https://bot.appski.me/webhooks/azure-devops`);
   });
 }

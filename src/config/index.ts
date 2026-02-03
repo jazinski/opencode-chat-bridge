@@ -53,6 +53,15 @@ export interface Config {
 
   // Logging
   logLevel: string;
+
+  // Azure DevOps Webhooks
+  azureDevOpsWebhookSecret: string;
+  azureDevOpsBotName: string;
+  azureDevOpsAllowedIps: string[];
+
+  // Workflows
+  workflowTimeoutMinutes: number;
+  workflowMaxAgents: number;
 }
 
 function parseAllowedUsers(value: string | undefined): number[] {
@@ -116,6 +125,15 @@ export const config: Config = {
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
+
+  // Azure DevOps Webhooks
+  azureDevOpsWebhookSecret: process.env.AZURE_DEVOPS_WEBHOOK_SECRET || '',
+  azureDevOpsBotName: process.env.AZURE_DEVOPS_BOT_NAME || '@OpenCodeBot',
+  azureDevOpsAllowedIps: parseAllowedChannels(process.env.AZURE_DEVOPS_ALLOWED_IPS),
+
+  // Workflows
+  workflowTimeoutMinutes: parseInt(process.env.WORKFLOW_TIMEOUT_MINUTES || '30', 10),
+  workflowMaxAgents: parseInt(process.env.WORKFLOW_MAX_AGENTS || '5', 10),
 };
 
 export function validateConfig(): void {
