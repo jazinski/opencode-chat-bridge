@@ -84,9 +84,15 @@ export class AgentPool {
 
     logger.debug(`Acquiring agent: ${agentId} for path ${path}`);
 
-    // Create a new session for this agent
+    // Create a new session for this agent with ZAI GLM-4.7 model
     // Use a special user ID to identify workflow agents
-    const session = sessionManager.getOrCreate(agentId, 'workflow-agent', path);
+    // Using ZAI GLM since Anthropic token is restricted to Claude Code only
+    const model = {
+      providerID: 'zai-coding-plan',
+      modelID: 'glm-4.7',
+    };
+
+    const session = sessionManager.getOrCreate(agentId, 'workflow-agent', path, model);
 
     // Start the session if not already running
     if (!session.isRunning()) {

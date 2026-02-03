@@ -90,7 +90,12 @@ export class SessionManager {
    * If no projectPath is provided, defaults to free chat mode
    * Note: Session is NOT automatically started - caller must start it
    */
-  getOrCreate(chatId: string, userId: string, projectPath?: string): Session {
+  getOrCreate(
+    chatId: string, 
+    userId: string, 
+    projectPath?: string,
+    model?: { providerID: string; modelID: string }
+  ): Session {
     let session = this.sessions.get(chatId);
 
     if (!session || session.getStatus() === 'terminated') {
@@ -108,7 +113,7 @@ export class SessionManager {
         ? config.dmSessionTimeoutMinutes 
         : config.sessionTimeoutMinutes;
       
-      session = new Session(chatId, userId, effectiveProjectPath, timeoutMinutes);
+      session = new Session(chatId, userId, effectiveProjectPath, timeoutMinutes, model);
       this.sessions.set(chatId, session);
     }
 

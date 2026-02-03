@@ -14,6 +14,10 @@ export interface SessionData {
   createdAt: Date;
   lastActivity: Date;
   opencodeSessionId?: string;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
 }
 
 export type SessionStatus = 'idle' | 'active' | 'busy' | 'terminated';
@@ -47,6 +51,7 @@ export class Session extends EventEmitter {
   public projectPath: string;
   public readonly createdAt: Date;
   public lastActivity: Date;
+  public model?: { providerID: string; modelID: string };
 
   private openCodeClient: OpenCodeClient | null = null;
   private opencodeSessionId: string | null = null;
@@ -58,7 +63,13 @@ export class Session extends EventEmitter {
   private isSwitchingProject: boolean = false;
   private timeoutMinutes: number; // Session-specific timeout
 
-  constructor(chatId: string, userId: string, projectPath: string, timeoutMinutes?: number) {
+  constructor(
+    chatId: string, 
+    userId: string, 
+    projectPath: string, 
+    timeoutMinutes?: number,
+    model?: { providerID: string; modelID: string }
+  ) {
     super();
     this.id = uuidv4();
     this.chatId = chatId;
@@ -67,8 +78,12 @@ export class Session extends EventEmitter {
     this.createdAt = new Date();
     this.lastActivity = new Date();
     this.timeoutMinutes = timeoutMinutes || config.sessionTimeoutMinutes;
+    this.model = model;
 
-    logger.info(`Session created: ${this.id} for user ${userId} at ${projectPath} (timeout: ${this.timeoutMinutes}min)`);
+    logger.info(
+      `Session created: ${this.id} for user ${userId} at ${projectPath} ` +
+      `(timeout: ${this.timeoutMinutes}min, model: ${model ? `${model.providerID}/${model.modelID}` : 'default'})`
+    );
   }
 
   /**
@@ -102,6 +117,7 @@ export class Session extends EventEmitter {
         hostname: config.opencodeServerHostname,
         directory: this.projectPath,
         autoStart: false,
+        model: this.model,
       });
 
       // Connect to external server or start a new one
@@ -273,7 +289,7 @@ export class Session extends EventEmitter {
 
     try {
       // Send message asynchronously (use SSE for response)
-      await this.openCodeClient.sendMessageAsync(this.opencodeSessionId, message);
+      await this.openCodeClient.sendMessageAsync(this.opencodeSessionId, message, this.model);
     } catch (error) {
       logger.error('Failed to send message:', error);
       this.status = 'active';
@@ -293,7 +309,7 @@ export class Session extends EventEmitter {
     this.touch();
 
     try {
-      const response = await this.openCodeClient.sendMessage(this.opencodeSessionId, message);
+      const response = await this.openCodeClient.sendMessage(this.opencodeSessionId, message, this.model);
       this.status = 'active';
       this.touch();
 

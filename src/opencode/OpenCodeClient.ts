@@ -35,6 +35,11 @@ export interface OpenCodeClientOptions {
   startupTimeout?: number;
   /** Whether to auto-start the server (default: true) */
   autoStart?: boolean;
+  /** AI model configuration (optional) */
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
 }
 
 export interface MessageResponse {
@@ -66,7 +71,8 @@ export interface OpenCodeClientEvents {
 export class OpenCodeClient extends EventEmitter {
   private client: SDKOpencodeClient | null = null;
   private serverHandle: { url: string; close: () => void } | null = null;
-  private options: Required<OpenCodeClientOptions>;
+  private options: Required<Omit<OpenCodeClientOptions, 'model'>> &
+    Pick<OpenCodeClientOptions, 'model'>;
   private eventAbortController: AbortController | null = null;
   private isReady = false;
   private isClosing = false;
@@ -79,6 +85,7 @@ export class OpenCodeClient extends EventEmitter {
       directory: options.directory ?? process.cwd(),
       startupTimeout: options.startupTimeout ?? 30000,
       autoStart: options.autoStart ?? true,
+      model: options.model,
     };
 
     if (this.options.autoStart) {
@@ -306,13 +313,18 @@ export class OpenCodeClient extends EventEmitter {
   /**
    * Send a message to a session (synchronous - waits for response)
    */
-  async sendMessage(sessionId: string, text: string): Promise<MessageResponse> {
+  async sendMessage(
+    sessionId: string,
+    text: string,
+    model?: { providerID: string; modelID: string }
+  ): Promise<MessageResponse> {
     this.ensureReady();
 
     const response = await this.client!.session.prompt({
       path: { id: sessionId },
       body: {
         parts: [{ type: 'text', text }],
+        model: model || this.options.model,
       },
       query: { directory: this.options.directory },
     });
@@ -327,13 +339,18 @@ export class OpenCodeClient extends EventEmitter {
   /**
    * Send a message asynchronously (returns immediately, use events for response)
    */
-  async sendMessageAsync(sessionId: string, text: string): Promise<void> {
+  async sendMessageAsync(
+    sessionId: string,
+    text: string,
+    model?: { providerID: string; modelID: string }
+  ): Promise<void> {
     this.ensureReady();
 
     const response = await this.client!.session.promptAsync({
       path: { id: sessionId },
       body: {
         parts: [{ type: 'text', text }],
+        model: model || this.options.model,
       },
       query: { directory: this.options.directory },
     });
