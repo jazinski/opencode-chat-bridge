@@ -64,6 +64,11 @@ export class AzureDevOpsApiClient {
       logger.info(`Adding comment to work item ${workItemId} in project ${project}`);
 
       const url = `/${project}/_apis/wit/workItems/${workItemId}/comments`;
+
+      // Log the full request details for debugging
+      logger.debug(`POST ${this.client!.defaults.baseURL}${url}`);
+      logger.debug(`Request body: ${JSON.stringify({ text: commentText })}`);
+
       const response = await this.client!.post(
         url,
         { text: commentText },
@@ -72,11 +77,26 @@ export class AzureDevOpsApiClient {
         }
       );
 
-      logger.info(`Comment added successfully: ${response.data.commentId}`);
+      // Log the full response for debugging
+      logger.debug(`Response status: ${response.status}`);
+      logger.debug(`Response data: ${JSON.stringify(response.data, null, 2)}`);
+
+      // Azure DevOps API returns 'id' not 'commentId'
+      const commentId = response.data.id || response.data.commentId;
+      logger.info(`Comment added successfully: ${commentId}`);
+
+      // Write successful response to file for inspection
+      import('fs/promises').then((fs) => {
+        fs.writeFile(
+          '/tmp/azure-comment-success.json',
+          JSON.stringify(response.data, null, 2),
+          'utf-8'
+        ).catch(() => {});
+      });
 
       return {
         success: true,
-        commentId: response.data.commentId,
+        commentId: commentId,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error adding comment';
